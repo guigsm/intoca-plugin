@@ -1,0 +1,23 @@
+# Modelo de .gitignore do projeto (tipo site). Na pasta do repositório ele se chama `.gitignore`;
+# dentro do pacote o nome é `_gitignore`, para não valer para a pasta de modelos.
+
+# Segredos (regimento, regra 6): o arquivo real nunca vai ao Git, só o modelo sem valor.
+**/.env*
+**/*.env
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+!**/.env.*.example
+!**/.env.*.sample
+!**/.env.*.template
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Dependências e registros
+**/node_modules/
+**/*.log
+
+# Configuração pessoal do app (permissões locais)
+.claude/settings.local.json

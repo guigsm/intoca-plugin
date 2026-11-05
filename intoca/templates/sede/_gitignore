@@ -1,0 +1,47 @@
+# Lista de permissão: ignora tudo e libera só governança e infraestrutura.
+# A sede guarda regras, mapa e manifesto. Cada projeto filho tem o seu próprio Git e fica ignorado aqui.
+# (No modelo do plugin este arquivo se chama `_gitignore`; na sede nova ele vira `.gitignore`.)
+*
+
+!.gitignore
+!AGENTS.md
+!CLAUDE.md
+!README.md
+!WORKSPACE.md
+!sede.yaml
+
+# Diretórios liberados (as regras de "!dir/" reabrem a descida na pasta)
+!diretoria/
+!diretoria/**
+!_infra/
+!_infra/**
+!.claude/
+!.claude/**
+
+# Dentro do liberado, nunca versionar:
+**/node_modules/
+**/.out/
+**/*.env
+**/.env*
+# ...menos os modelos, que a IA entrega e não têm valor (`.env.example`, `.env.crm.example`).
+# O arquivo real (`.env`, `.env.crm`, `hospedagem.env`) segue ignorado (regra 6).
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+!**/.env.*.example
+!**/.env.*.sample
+!**/.env.*.template
+**/*.log
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Worktrees que o app de desktop cria para cartões de tarefa
+.claude/worktrees/
+
+# Worktrees criadas pelo plugin, fora do backup
+_worktrees/
+
+# Configuração pessoal do app (permissões locais), nunca versionar
+.claude/settings.local.json

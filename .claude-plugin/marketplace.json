@@ -1,0 +1,21 @@
+{
+  "name": "intoca",
+  "description": "InToca: organiza o trabalho com IA no Claude Code como um escritório, com cargos, ordens de serviço e relatórios.",
+  "owner": {
+    "name": "guigsm"
+  },
+  "plugins": [
+    {
+      "name": "intoca",
+      "source": "./intoca",
+      "version": "1.0.4",
+      "description": "InToca Sede: a camada Claude da sede InToca. Cargos e rotinas como skills, assistentes de leitura e hooks do regimento, instaláveis em qualquer pasta."
+    },
+    {
+      "name": "intoca-sala",
+      "source": "./intoca-sala",
+      "version": "0.4.4",
+      "description": "InToca Sala: o quadro de avisos do escritório dentro do app (painel de OS, recursos e pendências, status da OS, faixa de pendências e /pendencias) e a página das Tocas no navegador, com lançador e serviço de logon opcional. Somente leitura; acesso antecipado."
+    }
+  ]
+}

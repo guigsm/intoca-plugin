@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tocas</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%23256f5c'/><path d='M4 5h8M4 8h8M4 11h5' stroke='white' stroke-width='1.6' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1;
+    --surface: #ffffff;
+    --text: #1d1f1e;
+    --muted: #66706c;
+    --line: #e2e0d9;
+    --accent: #256f5c;
+    --accent-text: #ffffff;
+    --ok: #1f8a4c;
+    --warn: #b7791f;
+    --off: #9aa19d;
+    --danger: #b3261e;
+    --code-bg: #f0efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151716;
+      --surface: #1e2120;
+      --text: #e8ebe9;
+      --muted: #9aa39f;
+      --line: #2e3331;
+      --accent: #4fb394;
+      --accent-text: #0f1a16;
+      --ok: #4cc27f;
+      --warn: #e0a84a;
+      --off: #6b7370;
+      --danger: #ef7d74;
+      --code-bg: #111312;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 40px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .list { margin-top: 24px; display: grid; gap: 10px; }
+  .site {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 16px;
+    align-items: center;
+  }
+  .name { font-weight: 600; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
+  .tag { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+  .running .dot { background: var(--ok); }
+  .starting .dot { background: var(--warn); animation: pulse 1s infinite alternate; }
+  @keyframes pulse { to { opacity: 0.35; } }
+  .meta { grid-column: 1; color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .meta code { font: 12px/1.4 ui-monospace, Consolas, monospace; }
+  .meta a { color: inherit; }
+  .actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 8px; align-items: center; }
+  button, .open {
+    font: inherit; font-size: 13px; font-weight: 500;
+    border-radius: 7px; padding: 6px 12px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--text);
+    text-decoration: none; white-space: nowrap;
+  }
+  button:hover, .open:hover { border-color: var(--muted); }
+  button.primary, .open { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.stop { color: var(--danger); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .lnk { font-size: 13px; font-weight: 500; border: 1px solid var(--line); border-radius: 7px; padding: 6px 12px; color: var(--text); text-decoration: none; white-space: nowrap; }
+  .lnk:hover { border-color: var(--muted); }
+  .actions { flex-wrap: wrap; justify-content: flex-end; }
+  .open[aria-disabled="true"] { pointer-events: none; opacity: 0.4; }
+  .state { font-size: 12px; color: var(--muted); min-width: 64px; text-align: right; }
+  .stall { font-size: 12px; color: var(--warn); }
+  .stall a { color: inherit; }
+  pre {
+    grid-column: 1 / -1; margin: 6px 0 0; max-height: 260px; overflow: auto;
+    background: var(--code-bg); border-radius: 7px; padding: 10px 12px;
+    font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  .err { color: var(--danger); font-size: 13px; grid-column: 1 / -1; }
+  h2 { font-size: 15px; margin: 32px 0 0; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+  .front { margin-top: 20px; }
+  .front h3 { font-size: 14px; margin: 0; font-weight: 600; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .front .list { margin-top: 10px; }
+  .grupo { display: grid; gap: 10px; }
+  .anexas { margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--line); display: grid; gap: 10px; }
+  .planned { opacity: 0.6; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 620px) {
+    .site { grid-template-columns: 1fr; }
+    .actions { grid-column: 1; grid-row: auto; flex-wrap: wrap; }
+    .state { text-align: left; min-width: 0; }
+  }
+  .topo { display: flex; gap: 8px; align-items: center; }
+  .aviso { margin-top: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; color: var(--muted); }
+  .aviso.warn { border-color: var(--warn); color: var(--warn); }
+  details.pend { margin-top: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; }
+  details.pend summary { cursor: pointer; font-weight: 600; }
+  details.pend ul { margin: 10px 0 4px; padding-left: 18px; font-size: 13px; }
+  details.pend li { margin: 4px 0; }
+  details.pend .tag { margin-left: 6px; }
+  h2[title] { cursor: help; }
+  /* ordem dos grupos (arrastar e teclado) */
+  .ordem { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+  .alca { cursor: grab; user-select: none; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; line-height: 1.3; }
+  .alca:hover, .alca:focus-visible { border-color: var(--muted); color: var(--text); }
+  .alca:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ordem button { padding: 1px 8px; font-size: 12px; }
+  .movel { border-radius: 10px; }
+  section.movel:not(.front) { margin-top: 28px; }
+  .movel.arrastando { opacity: 0.45; }
+  .movel.alvo-antes { box-shadow: 0 -3px 0 0 var(--accent); }
+  .movel.alvo-depois { box-shadow: 0 3px 0 0 var(--accent); }
+  .grupo-cab { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .grupo-cab h2, .grupo-cab h3 { margin: 0; }
+  .fixa-marca { font-size: 12px; font-weight: 400; color: var(--muted); }
+  /* a sala animada */
+  .auto { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+  .auto label { color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+  .instr { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+  .instr p { margin: 6px 0; }
+  .instr code { font: 12px/1.4 ui-monospace, Consolas, monospace; }
+  .instalacao { margin-top: 20px; background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 14px 16px; display: grid; gap: 10px; font-size: 14px; }
+  .instalacao h3 { margin: 0; font-size: 15px; }
+  .instalacao ol { margin: 0; padding-left: 20px; }
+  .instalacao .campos { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .instalacao label.campo { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+  .instalacao input[type=text], .instalacao input[type=number] { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+  .instalacao textarea { width: 100%; min-height: 150px; font: 12px/1.45 ui-monospace, Consolas, monospace; background: var(--code-bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px; }
+  .instalacao .botoes { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Tocas</h1>
+    <span class="topo">
+      <span class="sub" id="sub">InToca Sala · atualiza a cada 3 s</span>
+      <a class="open" id="ir-animada" href="#" hidden>Animada</a>
+    </span>
+  </header>
+  <div id="avisos"></div>
+  <details class="pend" id="pend" hidden>
+    <summary id="pend-resumo"></summary>
+    <div id="pend-lista"></div>
+  </details>
+  <section id="grupos" aria-live="polite"></section>
+  <footer>
+    Porta e comando vêm do <code>.env.example</code> e do <code>.claude/launch.json</code> de cada projeto;
+    tipo, porte e ferramentas, do <code>sede.yaml</code>; as pendências, da seção
+    <code>Esperando o proprietário</code> das filas.
+  </footer>
+</main>
+<script>
+  const gruposBox = document.getElementById('grupos');
+  const avisosBox = document.getElementById('avisos');
+  const irAnimada = document.getElementById('ir-animada');
+  const pend = document.getElementById('pend');
+  const openLogs = new Set();
+  const errors = new Map();
+  let lastSnapshot = '';
+  let controle = false;
+  let animadaInfo = {};       // saude.animada: instalada, auto, pode_instalar, faltam...
+  let ultimosDados = null;    // a última resposta de /api/tocas, para reordenar sem esperar a rede
+  let ordemLocal = null;      // ordem escolhida e ainda não confirmada pelo servidor (em memória; nada vai para o localStorage)
+  let arrastando = null;      // id do grupo que está sendo arrastado: enquanto isso a página não se redesenha
+  let focoDepois = null;      // botão de teclado a refocar depois de redesenhar
+  let fluxoAtivo = false;     // há uma instalação sendo lida por esta aba
+  let carregouInstalacao = false;
+  // Instalação da sala animada. `pasta` e `porta` são os campos digitados (não entram no snapshot, para não perder o foco).
+  const inst = { fase: 'ocioso', plano: null, pasta: '', porta: '', linhas: [], tick: '', resultado: null, erro: null, copiado: false, dispensado: null };
+  const LABEL = { running: 'rodando', starting: 'iniciando…', stopped: 'parado' };
+  const STALL_MS = 60000;
+
+  // Preferência de sala do navegador (nunca do manifesto). A Animada tem outra origem, então o botão dela
+  // (e o "Clássica" dela, que abre /?sala=classica) é que grava a escolha deste lado.
+  const pref = {
+    get() { try { return localStorage.getItem('intoca-sala'); } catch { return null; } },
+    set(v) { try { localStorage.setItem('intoca-sala', v); } catch {} },
+  };
+  const forcaClassica = new URLSearchParams(location.search).get('sala') === 'classica';
+  if (forcaClassica) pref.set('classica');
+
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') node.className = v;
+      else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+      else if (v !== undefined && v !== false) node.setAttribute(k, v === true ? '' : v);
+    }
+    node.append(...children.filter((c) => c !== undefined && c !== null));
+    return node;
+  }
+
+  const stalled = (s) => s.state === 'starting' && Boolean(s.startedAt) && Date.now() - s.startedAt > STALL_MS;
+
+  function stallNotice(s) {
+    if (s.logPort && s.logPort !== s.port) {
+      return el('span', { class: 'stall' }, 'o processo abriu a porta ', el('a', { href: `http://localhost:${s.logPort}` }, String(s.logPort)));
+    }
+    return el('span', { class: 'stall' }, `sem resposta na porta ${s.port}: veja o log`);
+  }
+
+  async function act(name, action, body) {
+    errors.delete(name);
+    const res = await fetch(`/api/sites/${encodeURIComponent(name)}/${action}`, {
+      method: 'POST', headers: { 'X-Painel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) errors.set(name, (await res.json().catch(() => ({}))).error || `erro ${res.status}`);
+    if (action === 'start' && res.ok) openLogs.add(name);
+    refresh();
+  }
+
+  // Processo externo: o servidor recusa sem `confirm: true`; a pergunta aqui só colhe a resposta.
+  function pararCom(s) {
+    const confirm_ = s.external
+      ? window.confirm('Esta porta é de um processo que a sala não iniciou (pode ser de outro chat). Encerrar mesmo?')
+      : undefined;
+    if (s.external && !confirm_) return;
+    act(s.name, 'stop', s.external ? { confirm: true } : {});
+  }
+
+  function planejado(m) {
+    const label = m.status === 'ativo' ? 'pasta não encontrada' : m.status || 'sem registro';
+    return el('section', { class: 'site stopped planned' },
+      el('div', { class: 'name' }, el('span', { class: 'dot', 'aria-hidden': 'true' }), m.nome,
+        m.tipo || m.porte ? el('span', { class: 'tag' }, [m.tipo, m.porte].filter(Boolean).join(' · ')) : null),
+      el('div', { class: 'actions' }, el('span', { class: 'state' }, label)),
+      el('div', { class: 'meta' }, el('span', {}, 'sem dev server')));
+  }
+
+  function cartao(s, log) {
+    const url = s.url ?? (s.port ? `http://localhost:${s.port}` : undefined);
+    const up = s.state === 'running';
+    const mexe = controle && !s.readOnly;
+    return el('section', { class: `site ${s.state}` },
+      el('div', { class: 'name' }, el('span', { class: 'dot', 'aria-hidden': 'true' }), s.name,
+        s.tipo || s.porte ? el('span', { class: 'tag' }, [s.tipo, s.porte].filter(Boolean).join(' · ')) : null),
+      el('div', { class: 'actions' },
+        s.external
+          ? el('span', { class: 'state', title: 'porta aberta por um processo que a sala não iniciou' }, 'em execução (externo)')
+          : el('span', { class: 'state', title: s.readOnly ? 'porta do manifesto (porta_dev): a sala só mostra o estado' : undefined },
+              s.canStart || up || s.readOnly ? LABEL[s.state] : s.estatico ? 'site estático' : 'sem dev server'),
+        stalled(s) ? stallNotice(s) : null,
+        mexe && s.canStart && s.state === 'stopped'
+          ? el('button', { class: 'primary', onclick: () => act(s.name, 'start') }, 'Iniciar')
+          : mexe && (s.canStart || up)
+            ? el('button', { class: 'stop', onclick: () => pararCom(s) }, 'Parar')
+            : null,
+        s.managed || openLogs.has(s.name)
+          ? el('button', { onclick: () => { openLogs.has(s.name) ? openLogs.delete(s.name) : openLogs.add(s.name); refresh(); } },
+              openLogs.has(s.name) ? 'Ocultar log' : 'Log')
+          : null,
+        // Cadeia de "Abrir": dev server; senão a pasta estática servida pela sala. Produção e VS Code vêm sempre que houver.
+        url ? el('a', { class: 'open', href: url, 'aria-disabled': up ? undefined : 'true' }, 'Abrir')
+          : s.estatico ? el('a', { class: 'open', href: s.estatico, target: '_blank', rel: 'noopener' }, 'Abrir') : null,
+        url && s.estatico ? el('a', { class: 'lnk', href: s.estatico, target: '_blank', rel: 'noopener', title: 'Pasta estática servida pela sala' }, 'Site local') : null,
+        s.producao ? el('a', { class: 'lnk', href: s.producao, target: '_blank', rel: 'noopener', title: s.producao }, 'Produção') : null,
+        s.vscode ? el('a', { class: 'lnk', href: s.vscode, title: 'Abrir a pasta no VS Code' }, 'VS Code') : null),
+      el('div', { class: 'meta' },
+        s.port ? el('span', {}, 'porta ', el('code', {}, String(s.port)))
+          : el('span', {}, s.estatico ? 'site estático (sem servidor)' : 'sem porta'),
+        url ? el('span', {}, el('a', { href: url, target: '_blank', rel: 'noopener' }, url.replace('http://', '').replace(/\/#.*$/, ''))) : null,
+        s.branch ? el('span', {}, 'branch ', el('code', {}, s.branch)) : null,
+        s.description ? el('span', {}, s.description) : null),
+      s.ehAnimada ? blocoAuto(s) : null,
+      errors.has(s.name) ? el('div', { class: 'err' }, errors.get(s.name)) : null,
+      log ? el('pre', {}, log.length ? log.join('\n') : 'Sem saída registrada (processo não iniciado por esta sala).') : null);
+  }
+
+  // ---------- ordem dos grupos ----------
+
+  // Mesma regra do servidor (agrupar.mjs · ordenar): o fixo em primeiro; id que sumiu ignorado; grupo novo no fim.
+  function ordenarLocal(grupos, ordem) {
+    if (!ordem) return grupos;
+    const fixos = grupos.filter((g) => g.fixo);
+    const moveis = grupos.filter((g) => !g.fixo);
+    const vistos = new Set();
+    const naOrdem = [];
+    for (const id of ordem) {
+      const g = moveis.find((x) => x.id === id);
+      if (g && !vistos.has(id)) { vistos.add(id); naOrdem.push(g); }
+    }
+    return [...fixos, ...naOrdem, ...moveis.filter((g) => !vistos.has(g.id))];
+  }
+
+  async function salvarOrdem(ids) {
+    const refocar = focoDepois; // a página se redesenha duas vezes (otimista e depois da resposta); o foco volta nas duas
+    ordemLocal = ids;
+    lastSnapshot = '';
+    if (ultimosDados) render(ultimosDados.dados, ultimosDados.saude);
+    try {
+      const res = await fetch('/api/preferencias', {
+        method: 'POST', headers: { 'X-Painel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ ordem: ids }),
+      });
+      if (!res.ok) avisoOrdem = (await res.json().catch(() => ({}))).error || `não consegui gravar a ordem (erro ${res.status})`;
+      else avisoOrdem = '';
+    } catch {
+      avisoOrdem = 'não consegui gravar a ordem: a sala não respondeu';
+    }
+    ordemLocal = null; // o servidor passa a mandar (ou, se falhou, volta a ordem anterior)
+    focoDepois = refocar;
+    lastSnapshot = '';
+    refresh();
+  }
+  let avisoOrdem = '';
+
+  // Ids dos grupos móveis na ordem que a tela mostra agora.
+  const idsMoveisAgora = () => ordenarLocal(ultimosDados.dados.grupos, ordemLocal).filter((g) => !g.fixo).map((g) => g.id);
+
+  function moverPara(id, antesDe, depois) {
+    const ids = idsMoveisAgora().filter((x) => x !== id);
+    const i = ids.indexOf(antesDe);
+    ids.splice(i < 0 ? ids.length : depois ? i + 1 : i, 0, id);
+    salvarOrdem(ids);
+  }
+
+  function moverUmPasso(id, passo) {
+    const ids = idsMoveisAgora();
+    const i = ids.indexOf(id);
+    const j = i + passo;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    focoDepois = { id, passo };
+    salvarOrdem(ids);
+  }
+
+  function controlesDeOrdem(g, pos, total) {
+    const alca = el('span', {
+      class: 'alca', draggable: 'true', tabindex: '0', role: 'button', 'data-alca': g.id,
+      'aria-label': `Mover o grupo ${g.titulo ?? g.id}: arraste, ou use as setas para cima e para baixo`,
+      title: 'Arraste para mudar a ordem',
+      onkeydown: (e) => {
+        if (e.key === 'ArrowUp') { e.preventDefault(); moverUmPasso(g.id, -1); }
+        if (e.key === 'ArrowDown') { e.preventDefault(); moverUmPasso(g.id, 1); }
+      },
+      ondragstart: (e) => {
+        arrastando = g.id;
+        e.dataTransfer.setData('text/plain', g.id);
+        e.dataTransfer.effectAllowed = 'move';
+        const sec = e.target.closest('.movel');
+        if (sec) { const r = sec.getBoundingClientRect(); e.dataTransfer.setDragImage(sec, e.clientX - r.left, e.clientY - r.top); setTimeout(() => sec.classList.add('arrastando'), 0); }
+      },
+      ondragend: () => { arrastando = null; for (const n of document.querySelectorAll('.movel')) n.classList.remove('arrastando', 'alvo-antes', 'alvo-depois'); refresh(); },
+    }, '⠿ mover');
+    return el('span', { class: 'ordem' },
+      alca,
+      el('button', { 'data-sobe': g.id, 'aria-label': `Subir o grupo ${g.titulo ?? g.id}`, title: 'Subir', disabled: pos === 0, onclick: () => moverUmPasso(g.id, -1) }, '▲'),
+      el('button', { 'data-desce': g.id, 'aria-label': `Descer o grupo ${g.titulo ?? g.id}`, title: 'Descer', disabled: pos === total - 1, onclick: () => moverUmPasso(g.id, 1) }, '▼'));
+  }
+
+  // Um grupo móvel é alvo de soltar: a metade de cima solta antes dele, a de baixo depois.
+  function tornarAlvo(secao, id) {
+    secao.addEventListener('dragover', (e) => {
+      if (!arrastando || arrastando === id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const r = secao.getBoundingClientRect();
+      const depois = e.clientY > r.top + r.height / 2;
+      secao.classList.toggle('alvo-antes', !depois);
+      secao.classList.toggle('alvo-depois', depois);
+    });
+    secao.addEventListener('dragleave', (e) => { if (!secao.contains(e.relatedTarget)) secao.classList.remove('alvo-antes', 'alvo-depois'); });
+    secao.addEventListener('drop', (e) => {
+      if (!arrastando || arrastando === id) return;
+      e.preventDefault();
+      const r = secao.getBoundingClientRect();
+      const origem = arrastando;
+      arrastando = null;
+      moverPara(origem, id, e.clientY > r.top + r.height / 2);
+    });
+  }
+
+  // ---------- a sala animada (AI Operations Room · InToca) ----------
+
+  async function postJson(caminho, corpo) {
+    return fetch(caminho, { method: 'POST', headers: { 'X-Painel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(corpo ?? {}) });
+  }
+
+  async function marcarAuto(s, valor) {
+    errors.delete(s.name);
+    const res = await postJson('/api/animada/auto', { auto: valor });
+    if (!res.ok) errors.set(s.name, (await res.json().catch(() => ({}))).error || `erro ${res.status}`);
+    lastSnapshot = '';
+    refresh();
+  }
+
+  // Na linha da Animada instalada: a caixa de "subir junto com o sistema" e a dica do favorito.
+  function blocoAuto(s) {
+    const caixa = el('input', { type: 'checkbox', id: 'animada-auto', disabled: !controle, onchange: (e) => marcarAuto(s, e.target.checked) });
+    caixa.checked = animadaInfo.auto === true;
+    const porta = s.port ?? animadaInfo.porta_padrao ?? 8765;
+    return el('div', { class: 'auto' },
+      el('label', { for: 'animada-auto' }, caixa, 'Subir a sala animada junto com o sistema'),
+      el('span', {}, controle
+        ? 'Sobe uma vez, no logon ou ao abrir um chat. Desmarcar não derruba a que já está de pé.'
+        : 'Precisa do controle ligado pelo proprietário.'),
+      el('span', {}, 'Para abrir direto na animada, favorite ', el('code', {}, `http://localhost:${porta}`), '. O localhost sem porta continua sendo esta sala.'));
+  }
+
+  function instrucoes(a) {
+    const pasta = a.pasta_sugerida ?? '<pasta da sede>/sala/app';
+    const porta = a.porta_padrao ?? 8765;
+    const faltam = a.faltam ?? [];
+    const como = { git: el('span', {}, 'git (', el('a', { href: 'https://git-scm.com', target: '_blank', rel: 'noopener' }, 'git-scm.com'), ')'),
+      uv: el('span', {}, 'uv (', el('a', { href: 'https://docs.astral.sh/uv/getting-started/installation/', target: '_blank', rel: 'noopener' }, 'instalação do uv'), ')'),
+      python: el('span', {}, 'Python 3.12 ou mais novo (depois do uv: ', el('code', {}, 'uv python install 3.12'), ')') };
+    return el('div', { class: 'instr' },
+      el('p', {}, 'No app, num chat da sede, diga ', el('code', {}, '/intoca:comecar'), ' e peça a sala animada. Ela pergunta antes de instalar.'),
+      faltam.length ? el('p', {}, 'Faltam nesta máquina: ', ...faltam.flatMap((f, i) => [i ? ', ' : '', como[f] ?? f])) : null,
+      !controle && !faltam.length ? el('p', {}, 'Para instalar por esta tela, o proprietário liga o controle (campo ', el('code', {}, 'controle'), ' em ', el('code', {}, '~/.intoca/sala.json'), ').') : null,
+      el('p', {}, 'Ou à mão, num terminal:'),
+      el('pre', {}, [
+        `git clone https://github.com/guigsm/AiOperationsRoom "${pasta}"`,
+        `cd "${pasta}" && uv sync`,
+        `cd "${pasta}" && uv run python -m backend.cli serve --port ${porta}`,
+      ].join('\n')));
+  }
+
+  function cartaoAnimadaAusente(a) {
+    const livre = inst.fase === 'ocioso' || inst.fase === 'falhou';
+    return el('section', { class: 'site stopped' },
+      el('div', { class: 'name' }, el('span', { class: 'dot', 'aria-hidden': 'true' }), 'AI Operations Room · InToca', el('span', { class: 'tag' }, 'não instalada')),
+      el('div', { class: 'actions' },
+        a.pode_instalar && livre ? el('button', { class: 'primary', onclick: pedirPlano }, 'Instalar') : null),
+      el('div', { class: 'meta' }, el('span', {}, 'Escritório em pixel art, uma sala por projeto, mostrando os seus chats trabalhando.')),
+      a.pode_instalar ? null : instrucoes(a));
+  }
+
+  async function pedirPlano() {
+    inst.erro = null;
+    inst.fase = 'planejando';
+    lastSnapshot = '';
+    refresh();
+    const corpo = {};
+    if (inst.pasta.trim()) corpo.pasta = inst.pasta.trim();
+    if (String(inst.porta).trim()) corpo.porta = Number(inst.porta);
+    const res = await postJson('/api/animada/instalar', corpo);
+    const j = await res.json().catch(() => ({}));
+    if (res.ok && j.plano) {
+      inst.plano = j.plano;
+      inst.pasta = j.plano.destino;
+      inst.porta = String(j.plano.porta);
+      inst.fase = 'plano';
+    } else {
+      inst.erro = j.error || `erro ${res.status}`;
+      inst.fase = 'ocioso';
+    }
+    lastSnapshot = '';
+    refresh();
+  }
+
+  async function instalar() {
+    inst.fase = 'rodando';
+    inst.linhas = [];
+    inst.tick = '';
+    inst.erro = null;
+    inst.resultado = null;
+    fluxoAtivo = true;
+    lastSnapshot = '';
+    refresh();
+    const corpo = { confirmado: true, pasta: inst.pasta.trim() || undefined, porta: String(inst.porta).trim() ? Number(inst.porta) : undefined };
+    try {
+      const res = await postJson('/api/animada/instalar', corpo);
+      if (!res.ok || !res.body) {
+        inst.erro = (await res.json().catch(() => ({}))).error || `erro ${res.status}`;
+        inst.fase = 'falhou';
+      } else {
+        const leitor = res.body.getReader();
+        const dec = new TextDecoder();
+        let resto = '';
+        for (;;) {
+          const { value, done } = await leitor.read();
+          resto += dec.decode(value ?? new Uint8Array(), { stream: !done });
+          const linhas = resto.split('\n');
+          resto = linhas.pop();
+          for (const l of linhas) if (l.trim()) aplicarEvento(JSON.parse(l));
+          lastSnapshot = '';
+          if (ultimosDados) render(ultimosDados.dados, ultimosDados.saude);
+          if (done) break;
+        }
+        if (inst.fase === 'rodando') { inst.fase = 'falhou'; inst.erro = 'A conexão com a sala foi cortada; veja se a instalação terminou.'; }
+      }
+    } catch {
+      inst.fase = 'falhou';
+      inst.erro = 'A sala não respondeu durante a instalação.';
+    }
+    fluxoAtivo = false;
+    lastSnapshot = '';
+    refresh();
+  }
+
+  function aplicarEvento(e) {
+    if (e.tipo === 'passo' && e.texto) { inst.linhas.push(e.texto); inst.tick = ''; }
+    else if (e.tipo === 'tick') inst.tick = `${e.passo === 'clonar' ? 'Baixando' : 'Preparando o ambiente'}… ${e.segundos} s`;
+    else if (e.tipo === 'fim') {
+      if (e.ok) { inst.fase = 'pronta'; inst.resultado = e; inst.tick = ''; }
+      else { inst.fase = 'falhou'; inst.erro = e.error || 'A instalação falhou.'; inst.tick = ''; }
+    }
+  }
+
+  // Relê o estado do servidor quando a página foi recarregada no meio (ou depois) de uma instalação.
+  async function lerInstalacao() {
+    if (fluxoAtivo) return;
+    const s = await fetch('/api/animada/instalacao').then((r) => r.json()).catch(() => null);
+    if (!s) return;
+    carregouInstalacao = true;
+    if (s.fase === 'rodando' && inst.fase !== 'rodando') { inst.fase = 'rodando'; inst.linhas = s.linhas ?? []; }
+    else if (s.fase === 'rodando') inst.linhas = s.linhas ?? [];
+    else if (s.fase === 'pronta' && inst.fase !== 'pronta' && inst.dispensado !== s.resultado?.destino) { inst.fase = 'pronta'; inst.resultado = s.resultado; inst.linhas = s.linhas ?? []; }
+    else if (s.fase === 'falhou' && inst.fase === 'rodando') { inst.fase = 'falhou'; inst.erro = s.erro?.error || 'A instalação falhou.'; }
+  }
+
+  async function copiar(texto) {
+    try { await navigator.clipboard.writeText(texto); inst.copiado = true; }
+    catch { const t = document.getElementById('pedido-texto'); t?.select(); inst.copiado = document.execCommand?.('copy') ?? false; }
+    lastSnapshot = '';
+    refresh();
+  }
+
+  function painelInstalacao() {
+    if (inst.fase === 'ocioso' && !inst.erro) return null;
+    if (inst.fase === 'planejando') return el('div', { class: 'instalacao', role: 'status' }, 'Conferindo a máquina…');
+    const erro = inst.erro ? el('div', { class: 'err' }, inst.erro) : null;
+    if (inst.fase === 'ocioso') return el('div', { class: 'instalacao' }, el('h3', {}, 'Instalar a sala animada'), erro);
+    if (inst.fase === 'plano') {
+      const p = inst.plano;
+      return el('div', { class: 'instalacao' },
+        el('h3', {}, 'Instalar a sala animada: confira o plano'),
+        el('ol', {},
+          el('li', {}, 'Baixar ', el('code', {}, p.url), ' para a pasta abaixo (', p.destinoEstado === 'ja-clonado' ? 'já baixada: pulo esta etapa' : 'internet, algumas dezenas de MB', ').'),
+          el('li', {}, 'Rodar ', el('code', {}, 'uv sync'), ' dentro dela para preparar o Python. Pode levar vários minutos (até 15 no pior caso).'),
+          el('li', {}, 'Anotar a pasta e a porta em ', el('code', {}, '~/.intoca/sala.json'), '.'),
+          el('li', {}, 'Mostrar aqui o pedido pronto para a Diretoria colocar a sala animada no manifesto.')),
+        el('div', { class: 'campos' },
+          el('label', { class: 'campo' }, 'Pasta de destino', el('input', { type: 'text', size: '48', value: inst.pasta, oninput: (e) => { inst.pasta = e.target.value; } })),
+          el('label', { class: 'campo' }, 'Porta', el('input', { type: 'number', min: '1024', max: '65535', style: 'width: 90px', value: inst.porta, oninput: (e) => { inst.porta = e.target.value; } }))),
+        el('div', { class: 'sub' }, p.hooks),
+        erro,
+        el('div', { class: 'botoes' },
+          el('button', { class: 'primary', onclick: instalar }, 'Confirmar e instalar'),
+          el('button', { onclick: pedirPlano }, 'Conferir de novo'),
+          el('button', { onclick: () => { inst.fase = 'ocioso'; inst.plano = null; inst.erro = null; lastSnapshot = ''; refresh(); } }, 'Cancelar')));
+    }
+    if (inst.fase === 'rodando') {
+      return el('div', { class: 'instalacao', role: 'status' },
+        el('h3', {}, 'Instalando a sala animada…'),
+        el('pre', {}, [...inst.linhas, inst.tick].filter(Boolean).join('\n') || 'Começando…'),
+        el('div', { class: 'sub' }, 'Pode demorar vários minutos. Esta página continua mostrando o andamento; se você recarregá-la, ela retoma de onde parou.'));
+    }
+    if (inst.fase === 'falhou') {
+      return el('div', { class: 'instalacao' },
+        el('h3', {}, 'A instalação não terminou'),
+        erro,
+        el('div', { class: 'botoes' },
+          el('button', { class: 'primary', onclick: pedirPlano }, 'Conferir de novo'),
+          el('button', { onclick: () => { inst.fase = 'ocioso'; inst.erro = null; lastSnapshot = ''; refresh(); } }, 'Fechar')));
+    }
+    // pronta: o texto do pedido à Diretoria fica aqui até a pessoa fechar (o cartão da Animada já virou o normal)
+    return el('div', { class: 'instalacao' },
+      el('h3', {}, 'Sala animada instalada'),
+      el('div', {}, 'Falta um passo, que é da Diretoria: registrar a sala animada no manifesto da sede. Copie o pedido abaixo e leve ao chat da Diretoria. Os hooks não foram registrados por este botão (isso é do ', el('code', {}, '/intoca:comecar'), ', com o seu consentimento).'),
+      el('textarea', { id: 'pedido-texto', readonly: true, 'aria-label': 'Pedido à Diretoria' }, inst.resultado?.pedido ?? ''),
+      el('div', { class: 'botoes' },
+        el('button', { class: 'primary', onclick: () => copiar(inst.resultado?.pedido ?? '') }, inst.copiado ? 'Copiado' : 'Copiar o pedido'),
+        el('button', { onclick: () => { inst.dispensado = inst.resultado?.destino ?? null; inst.fase = 'ocioso'; inst.erro = null; inst.copiado = false; lastSnapshot = ''; refresh(); } }, 'Fechar')),
+      el('div', { class: 'sub' }, 'Para iniciar à mão: ', el('code', {}, inst.resultado?.iniciar ?? '')));
+  }
+
+  // ---------- a página ----------
+
+  async function render(dados, saude) {
+    if (arrastando) return; // soltar o grupo termina o gesto; redesenhar no meio o estragaria
+    const foco = document.activeElement;
+    if (foco && gruposBox.contains(foco) && foco.matches?.('input[type=text], input[type=number]')) return; // não rouba o foco de quem digita
+    const todos = dados.lista;
+    const logs = new Map(await Promise.all(todos.filter((s) => openLogs.has(s.name)).map((s) =>
+      fetch(`/api/sites/${encodeURIComponent(s.name)}/log`).then((r) => r.json()).then((j) => [s.name, j.lines]))));
+    const grupos = ordenarLocal(dados.grupos, ordemLocal);
+    const snapshot = JSON.stringify([grupos, saude.controle, saude.animada, [...logs], [...openLogs], [...errors], todos.map(stalled),
+      inst.fase, inst.plano, inst.linhas, inst.tick, inst.erro, inst.resultado, inst.copiado, avisoOrdem]);
+    if (snapshot === lastSnapshot) return;
+    lastSnapshot = snapshot;
+    controle = saude.controle === true;
+    animadaInfo = saude.animada ?? {};
+    const topo = [];
+    if (!dados.sede) {
+      topo.push(el('div', { class: 'aviso warn' }, 'Não achei a sede. Rode /intoca:comecar, ou defina INTOCA_SEDE com a pasta que tem o sede.yaml.'));
+    }
+    if (avisoOrdem) topo.push(el('div', { class: 'aviso warn' }, avisoOrdem));
+    const painel = painelInstalacao();
+    if (painel) topo.push(painel);
+    if (dados.suite) topo.push(el('h2', { title: dados.suite.regra }, dados.suite.nome || 'Suíte'));
+    const blocos = [];
+    const moveis = grupos.filter((g) => !g.fixo);
+    // A Animada sem instalar tem linha própria no grupo fixo (ou, sem grupo fixo, no topo da lista).
+    const ausente = animadaInfo.instalada === false && dados.sede ? cartaoAnimadaAusente(animadaInfo) : null;
+    let ausenteColocada = false;
+    for (const g of grupos) {
+      const itens = g.itens.map((it) => {
+        const cab = it.toca ? cartao(it.toca, logs.get(it.toca.name)) : planejado(it.planejado);
+        return it.anexas.length ? el('div', { class: 'grupo' }, cab, el('div', { class: 'anexas' }, ...it.anexas.map((a) => cartao(a, logs.get(a.name))))) : cab;
+      });
+      if (g.fixo && ausente) { itens.unshift(ausente); ausenteColocada = true; }
+      const pos = moveis.indexOf(g);
+      const ctrl = !g.fixo && moveis.length > 1 ? controlesDeOrdem(g, pos, moveis.length) : null;
+      const lista = el('div', { class: 'list' }, ...itens);
+      let secao;
+      if (g.tipo === 'frente') {
+        secao = el('section', { class: g.fixo ? 'front fixo' : 'front movel', 'data-grupo': g.id },
+          el('div', { class: 'grupo-cab' }, el('h3', {}, g.titulo, g.descricao ? el('span', { class: 'tag' }, g.descricao) : null), g.fixo ? el('span', { class: 'fixa-marca' }, 'fixa no topo') : null, ctrl),
+          lista);
+      } else {
+        secao = el('section', { class: g.fixo ? '' : 'movel', 'data-grupo': g.id },
+          g.titulo || ctrl ? el('div', { class: 'grupo-cab' }, g.titulo ? el('h2', {}, g.titulo, el('span', { class: 'tag' }, String(itens.length))) : null, ctrl) : null,
+          lista);
+      }
+      if (!g.fixo && moveis.length > 1) tornarAlvo(secao, g.id);
+      blocos.push(secao);
+    }
+    // Sem grupo fixo para abrigá-la, a linha da Animada não instalada abre a lista.
+    if (ausente && !ausenteColocada) blocos.unshift(el('div', { class: 'list', style: 'margin-top: 20px' }, ausente));
+    gruposBox.replaceChildren(...topo, ...blocos);
+    for (const pre of document.querySelectorAll('pre')) pre.scrollTop = pre.scrollHeight;
+    if (focoDepois) {
+      const alvo = document.querySelector(focoDepois.passo < 0 ? `[data-sobe="${CSS.escape(focoDepois.id)}"]` : `[data-desce="${CSS.escape(focoDepois.id)}"]`);
+      (alvo && !alvo.disabled ? alvo : document.querySelector(`[data-alca="${CSS.escape(focoDepois.id)}"]`))?.focus();
+      focoDepois = null;
+    }
+  }
+
+  function avisos(saude) {
+    const lista = [];
+    if (!saude.controle) lista.push(el('div', { class: 'aviso' }, 'Controle desligado: a sala só mostra o estado. Iniciar e Parar são ligados pelo proprietário.'));
+    if (saude.animada.registrada && !saude.animada.no_ar && pref.get() === 'animada' && !forcaClassica) {
+      lista.push(el('div', { class: 'aviso warn' }, 'A Animada não está respondendo; você ficou na Clássica.'));
+    }
+    const falta = saude.faltaNoManifesto ?? [];
+    if (falta.length) lista.push(el('div', { class: 'aviso' }, 'Falta no manifesto (peça à Diretoria): ' + falta.map((f) => `${f.ferramenta} (${f.campos.join(', ')})`).join('; ')));
+    avisosBox.replaceChildren(...lista);
+    irAnimada.hidden = !(saude.animada.registrada && saude.animada.no_ar);
+    if (!irAnimada.hidden) irAnimada.href = `${location.protocol}//${location.hostname}:${saude.animada.porta}/`;
+  }
+
+  function pendencias(p) {
+    pend.hidden = !p.sede;
+    if (!p.sede) return;
+    document.getElementById('pend-resumo').textContent = p.total
+      ? `Esperando o proprietário: ${p.total} ${p.total === 1 ? 'item' : 'itens'}`
+      : 'Esperando o proprietário: nada aberto';
+    const blocos = p.fontes.filter((f) => f.abertas.length || !f.lida).map((f) =>
+      el('div', {}, el('strong', {}, f.origem), el('span', { class: 'tag' }, f.arquivo),
+        f.lida ? el('ul', {}, ...f.abertas.map((a) => el('li', {}, a.tipo ? el('span', { class: 'tag' }, a.tipo) : null, a.pedido, a.onde ? el('span', { class: 'tag' }, `→ ${a.onde}`) : null)))
+               : el('div', { class: 'sub' }, `sem dados (${f.motivo})`)));
+    document.getElementById('pend-lista').replaceChildren(...blocos);
+  }
+
+  let jaRedirecionou = false;
+  async function refresh() {
+    try {
+      const [dados, saude, p] = await Promise.all([
+        fetch('/api/tocas').then((r) => r.json()),
+        fetch('/api/saude').then((r) => r.json()),
+        fetch('/api/pendencias').then((r) => r.json()).catch(() => ({ sede: false })),
+      ]);
+      // A raiz é a Clássica; só vai para a Animada quando o navegador prefere e ela responde.
+      if (!jaRedirecionou && !forcaClassica && pref.get() === 'animada' && saude.animada.no_ar) {
+        jaRedirecionou = true;
+        location.replace(`${location.protocol}//${location.hostname}:${saude.animada.porta}/`);
+        return;
+      }
+      avisos(saude);
+      pendencias(p);
+      ultimosDados = { dados, saude };
+      if (!carregouInstalacao || inst.fase === 'rodando') await lerInstalacao();
+      render(dados, saude);
+    } catch {
+      lastSnapshot = '';
+      gruposBox.replaceChildren(el('div', { class: 'list' }, el('div', { class: 'err' }, 'A InToca Sala não está respondendo. Ela está rodando?')));
+    }
+  }
+
+  irAnimada.addEventListener('click', () => pref.set('animada'));
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+# =============================================================================
+# sede.yaml - manifesto da sede (modelo da sede de partida do plugin intoca).
+# Camada LOCAL desta máquina: caminhos absolutos são permitidos aqui. Nenhum segredo, token ou
+# conteúdo de .env pode entrar neste arquivo.
+#
+# Campos de topo
+#   versao          formato do manifesto (número inteiro; hoje 1)
+#   plugin_minimo   versão mínima do plugin intoca com que esta sede funciona (texto semver); só avisa, nunca bloqueia
+#   sede            identidade da sede: nome e, comentados, modo, perfil e rigor
+#   projetos        um item por projeto (clonáveis pelo campo repositorio)
+#   ferramentas     programas de terceiros ou locais, que servem a vários projetos
+#   compartilhado   pastas "_" da raiz (não são produto nem vão para deploy)
+#   rotinas         tarefas agendadas e o que executam
+#   titulos         (comentado, no fim) padrão dos títulos dos chats de cargo
+#
+# Campos de cada projeto
+#   nome, tipo (site|app|servico|motor|midia|estudo|documento),
+#   porte (ocasional|pequeno|medio|grande), status (ativo|candidato|encerrado),
+#   sigla (prefixo das OS do projeto, em maiúsculas: LOJ-01; a sede usa DIR; cada projeto ativo
+#          tem uma sigla distinta),
+#   pasta_atual (onde o projeto mora hoje), pasta_futura (destino de uma migração; opcional),
+#   pastas_antigas (lista de caminhos antigos, para os avisos de pasta errada),
+#   repositorio (origin real; null se não há Git), branch_principal, stack,
+#   gerenciador (npm|pnpm|uv|nenhum), node, porta_dev, deploy,
+#   gerente (título do chat do gerente), fabrica (nome do projeto de que este é derivado),
+#   grupo (nome do grupo do projeto na barra lateral do app),
+#   exibicao (ferramenta: o projeto aparece como ferramenta, não como toca),
+#   backup, observacoes.
+# Valores desconhecidos ficam null.
+# Os hooks do plugin leem deste arquivo só: nome, sigla, pasta_atual, pasta_futura, pastas_antigas,
+# branch_principal, deploy e exibicao de cada item de `projetos`, o rigor de `sede` e os `titulos`.
+# =============================================================================
+versao: 1
+plugin_minimo: '0.10.0'   # versao minima do plugin intoca com que esta sede funciona; so aviso
+
+sede:
+  nome: <nome-da-sede>
+  # modo e perfil são preenchidos pelo /intoca:comecar. Descomente só se for escrever à mão.
+  # modo: agregadora       # agregadora: os projetos moram dentro da pasta da sede | registro: a sede guarda só governança e este arquivo aponta onde cada projeto está
+  # perfil: iniciante      # iniciante (nunca usou Git) | ocasional (usa às vezes) | desenvolvedor
+  # O rigor diz quanto o porteiro do plugin pergunta antes de deixar o Claude agir. O /intoca:comecar e o
+  # /intoca:rigor o gravam na linha abaixo; comentado ou ausente vale o equilibrado. cauteloso: só leitura comum e governança passam sem
+  # pergunta. equilibrado: a rotina do regimento também passa. autonomo: chega numa versão seguinte (até lá vale
+  # como equilibrado). Valor que não é um destes vale o cauteloso. Ver docs/permissoes.md do plugin.
+  # rigor: equilibrado     # cauteloso | equilibrado
+
+# Sem projetos ainda. Ao registrar o primeiro, troque `projetos: []` por `projetos:` e acrescente os itens
+# abaixo dela, alinhados. Exemplo de um item (fictício):
+#
+# projetos:
+#   - nome: padaria.exemplo.br
+#     sigla: PAD
+#     tipo: site
+#     porte: pequeno
+#     status: ativo
+#     pasta_atual: '<sede>/padaria/site'
+#     repositorio: null
+#     branch_principal: main
+#     stack: 'a definir'
+#     porta_dev: null
+#     deploy: null
+#     gerente: 'Gerente · padaria.exemplo.br'
+projetos: []
+
+# Programas que servem a vários projetos. Exemplo de item (fictício):
+#   - nome: Servidor de prévia
+#     pasta: '<sede>/_tools/previa'
+#     porta: 4000
+#     instala: 'como instalar'
+#     inicia: 'como iniciar'
+ferramentas: []
+
+# Pastas "_" da raiz que não são produto. Exemplo de item (fictício):
+#   - nome: _shared
+#     caminho: '<sede>/_shared'
+#     o_que_e: 'material comum a mais de um projeto'
+compartilhado: []
+
+# Tarefas agendadas e o que executam. Exemplo de item (fictício):
+#   - nome: Backup-da-sede
+#     onde: 'agendador do sistema'
+#     executa: 'comando ou script'
+rotinas: []
+
+# Padrão de títulos dos chats de cargo (lido pelo plugin: hook chat-trocado e /intoca:comecar).
+# Marcadores, só estes: {projeto} nome do projeto; {id} identificador da OS; {tema} resumo; {funcao} função do plantão.
+# Cada padrão tem até 60 caracteres, numa linha só. Padrão ausente ou inválido (marcador desconhecido, texto longo,
+# gerente sem {projeto}, executor sem {id}): vale o padrão abaixo. O título é só um dado: ele não dá ordem a ninguém.
+# Pode ser escrito em bloco, como abaixo, ou em linha: titulos: {gerente: 'Chefe · {projeto}'}
+# titulos:
+#   diretoria: 'Diretoria'
+#   secretaria: 'Secretaria'
+#   gerente: 'Gerente · {projeto}'
+#   plantao: 'Plantão · {funcao} · {projeto}'
+#   executor: 'Executor · {id} {tema}'
