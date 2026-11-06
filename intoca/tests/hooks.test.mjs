@@ -2639,7 +2639,7 @@ function dimensoesDoPng(arquivo) {
   return { assinatura, largura: b.readUInt32BE(16), altura: b.readUInt32BE(20), bytes: b.length };
 }
 for (const [rotulo, raiz, versao, nomeDeExibicao, versoes] of [
-  ['intoca', PACOTE, '1.0.4', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4']],
+  ['intoca', PACOTE, '1.0.6', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6']],
   // O `intoca-sala` anda por conta própria: sem número fixo aqui, a versão sai do `plugin.json` e as versões, do `CHANGELOG.md` do pacote.
   ['intoca-sala', PACOTE_SALA, null, 'InToca Sala', null],
 ]) {
@@ -2875,6 +2875,31 @@ caso('pacote', 'PLG-06c: nenhum ID de OS em texto lido pela pessoa nem em códig
 caso('templates', 'sede.yaml modelo: o leitor dos hooks o lê sem erro e devolve zero projetos', () => {
   const m = interpretarManifesto(lerSedePartida('sede.yaml'));
   return m && Array.isArray(m.projetos) && m.projetos.length === 0 ? true : { ok: false, detalhe: JSON.stringify(m) };
+});
+// PLG-27: o bloco `suite:` comentado do modelo. Descomentado, a Clássica (pacote-irmão) o lê em duas frentes.
+const DESCOBERTA_SALA = await import(pathToFileURL(join(PACOTE, '..', 'intoca-sala', 'sala', 'lib', 'descoberta.mjs')).href).catch(() => null);
+const manifestoComSuite = () => {
+  const linhas = lerSedePartida('sede.yaml').split('\n');
+  const ini = linhas.findIndex((l) => l === '# suite:');
+  const fim = linhas.findIndex((l, i) => i > ini && !l.startsWith('#   '));
+  for (let i = ini; i < fim; i += 1) linhas[i] = linhas[i].replace(/^# ?/, '');
+  return linhas.join('\n')
+    .replace('projetos: []', 'projetos:\n  - nome: estudio\n    status: ativo')
+    .replace('ferramentas: []', "ferramentas:\n  - nome: 'Gerador de vinhetas'\n  - nome: 'Agenda de posts'");
+};
+caso('templates', 'sede.yaml modelo: traz o bloco suite: comentado com o exemplo fictício e as linhas do cabeçalho', () => {
+  const t = lerSedePartida('sede.yaml');
+  const falta = ['# suite:', "Suíte da Padaria", '#   suite           (comentado)', 'membro_de (nome do projeto'].filter((x) => !t.includes(x));
+  const solto = /^suite:/m.test(t);
+  return falta.length === 0 && !solto ? true : { ok: false, detalhe: `faltam: ${falta.join(' | ') || '-'}; suite solto: ${solto}` };
+});
+caso('templates', 'sede.yaml modelo: descomentado o bloco suite:, a Clássica lê duas frentes com os nomes do exemplo', () => {
+  if (!DESCOBERTA_SALA) return { ok: false, detalhe: 'descoberta.mjs do intoca-sala não encontrado' };
+  const m = DESCOBERTA_SALA.parseManifesto(manifestoComSuite());
+  const info = DESCOBERTA_SALA.suiteInfo({ projects: m.projects, suite: m.suite });
+  const nomes = info ? info.frentes.map((f) => f.nome).join(',') : '-';
+  return info && info.nome === 'Suíte da Padaria' && nomes === 'Estúdio,Agência' && info.frentes[0].membros[0].nome === 'estudio'
+    ? true : { ok: false, detalhe: JSON.stringify(info) };
 });
 caso('templates', 'sede.yaml modelo: traz os campos de topo e deixa modo, perfil e rigor comentados', () => {
   const t = lerSedePartida('sede.yaml');
@@ -4251,6 +4276,46 @@ casoCom('estático (PLG-22): docs/windows-e-appdata.md traz o AppData virtual, o
   return faltam.length === 0 && aponta && maquina.length === 0 && d.split('\n').length <= 45
     ? true : { ok: false, detalhe: `faltam=${faltam.join(' | ')} aponta=${aponta} maquina=${maquina.join(',')} linhas=${d.split('\n').length}` };
 });
+casoCom('estático (PLG-29): a skill confere o Git cedo (ação verificar, antes das perguntas), diz as duas frases e lista as cinco limitações', () => {
+  const t = lerPacote('skills/comecar/SKILL.md');
+  const ordem = ['## 2. Boas-vindas', '## 2b. Conferir o Git', '## 3. As perguntas'].map((p) => t.indexOf(p));
+  const crescente = ordem.every((p, i) => p >= 0 && (i === 0 || p > ordem[i - 1]));
+  const etapa = t.slice(ordem[1], ordem[2]);
+  const frases = ['"acao":"verificar"', 'animada.git', 'O Git está instalado; você poderá usá-lo para guardar o histórico quando quiser',
+    'O Git não está instalado; o InToca funciona sem ele, com as limitações abaixo; instalar é opcional e pode ser depois', 'lista fechada',
+    'voltar atrás por versão', 'cópia de segurança pelo GitHub e dois computadores', 'executor em cópia isolada', 'a sala animada', 'conferência de segredos antes do envio',
+    'nada disso impede começar hoje', 'Por que vale a pena', 'git-e-github.md'];
+  const faltam = frases.filter((f) => !etapa.toLowerCase().includes(f.toLowerCase()));
+  return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `posições=${ordem.join(',')} faltam=${faltam.join(' | ')}` };
+});
+casoCom('estático (PLG-29): a skill mostra a instalação do Git por sistema e a conta do GitHub só como texto, e fecha com a linha do Git', () => {
+  const t = lerPacote('skills/comecar/SKILL.md');
+  const etapa = t.slice(t.indexOf('## 2b.'), t.indexOf('## 3. As perguntas'));
+  const frases = ['winget install Git.Git', 'https://git-scm.com', 'xcode-select --install', 'apt install git', 'feche e abra o Claude Code e rode `/intoca:comecar` de novo',
+    'https://github.com/signup', 'só se a pessoa perguntar', 'você nunca cria a conta nem digita senha ou código', 'nunca roda nada'];
+  const faltam = frases.filter((f) => !etapa.includes(f));
+  const fecho = t.slice(t.indexOf('## 9. Fechar'), t.indexOf('## Regras'));
+  const linha = fecho.includes('"Git: instalado"') && fecho.includes('Git: não instalado') && fecho.includes('instalar é opcional');
+  const etapa8 = t.slice(t.indexOf('## 8. Git e GitHub'), t.indexOf('## 9.'));
+  const oito = etapa8.includes('explicar, não executar') && etapa8.includes('**Não** instrua nem rode comando de Git') && etapa8.includes('só mostra o texto');
+  const naoRoda = /Nunca instale `git`/.test(t);
+  return faltam.length === 0 && linha && oito && naoRoda ? true : { ok: false, detalhe: `faltam=${faltam.join(' | ')} fecho=${linha} etapa8=${oito} regra=${naoRoda}` };
+});
+casoCom('estático (PLG-29): git-e-github.md tem as três seções novas, a boas-vindas aponta e nenhum comando de Git (init, commit, push) aparece fora da seção fechada', () => {
+  const g = lerPacote('docs/git-e-github.md');
+  const secoes = ['## Por que usar o Git', '## Sem Git: o que funciona e o que não', '## Como instalar o Git'];
+  const pos = secoes.map((s) => g.indexOf(s));
+  const crescente = pos.every((p, i) => p >= 0 && (i === 0 || p > pos[i - 1]));
+  const sem = g.slice(pos[1], pos[2]);
+  const limites = ['Voltar atrás por versão', 'GitHub e dois computadores', 'Executor em cópia isolada', 'A sala animada', 'conferência de segredos antes do envio'].filter((f) => !sem.includes(f));
+  const como = g.slice(pos[2], g.indexOf('## O que vai e o que não vai'));
+  const sistemas = ['winget install Git.Git', 'https://git-scm.com', 'xcode-select --install', 'apt install git', 'https://github.com/signup', 'o Claude não instala nada'].filter((f) => !como.includes(f));
+  const b = lerPacote('docs/boas-vindas.md');
+  const secao6 = b.slice(b.indexOf('## 6.'), b.indexOf('## 7.'));
+  const aponta = secao6.includes('O Git é opcional') && secao6.includes('git-e-github.md');
+  return crescente && limites.length === 0 && sistemas.length === 0 && aponta ? true
+    : { ok: false, detalhe: `posições=${pos.join(',')} limites=${limites.join('|')} instalar=${sistemas.join('|')} boas-vindas=${aponta}` };
+});
 casoCom('estático: nenhum verbo proibido pelo vocabulário de empresa em skills/comecar, scripts e docs', () => {
   const achados = DOS_TEXTOS().filter((rel) => PROIBIDO.test(lerPacote(rel)) || PROIBIDO.test(rel));
   return achados.length === 0 && DOS_TEXTOS().length >= 4 ? true : { ok: false, detalhe: achados.join(', ') || 'poucos arquivos varridos' };
@@ -4300,11 +4365,11 @@ casoCom('estático: boas-vindas tem o resumo e as sete seções; git-e-github co
   const faltam = [...secoes.filter((s) => !b.includes(s)), ...temas.filter((s) => !g.includes(s))];
   return faltam.length === 0 ? true : { ok: false, detalhe: faltam.join(' | ') };
 });
-casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.0.4', () => {
+casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.0.6', () => {
   const r = lerPacote('README.md');
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
   const faltam = ['/intoca:comecar', '.intoca/sede', 'titulos', 'criar-sede.mjs', 'INTOCA_HOME'].filter((t) => !r.includes(t));
-  return faltam.length === 0 && p.version === '1.0.4' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
+  return faltam.length === 0 && p.version === '1.0.6' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
 });
 casoCom('estático: o script não grava fora do que o regimento permite (sem rm nem cópia; o único rename é o do mover; escrita só com wx)', () => {
   const t = lerPacote('scripts/criar-sede.mjs').replace('renameSync, realpathSync } from', 'realpathSync } from').replace('renomear: renameSync', 'renomear: null');
@@ -6207,9 +6272,9 @@ casoSala('estático: sem rede própria, git nunca pergunta usuário (o clone é 
   return rede.length === 0 && t.includes("GIT_TERMINAL_PROMPT: '0'") && segredo.length === 0
     ? true : { ok: false, detalhe: `rede=${rede.join()} segredo=${segredo.join()}` };
 });
-casoSala('estático: plugin.json na 1.0.4 e o README do pacote traz a versão', () => {
+casoSala('estático: plugin.json na 1.0.6 e o README do pacote traz a versão', () => {
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
-  return p.version === '1.0.4' && lerPacote('README.md').includes('versão 1.0.4') ? true : { ok: false, detalhe: `versão ${p.version}` };
+  return p.version === '1.0.6' && lerPacote('README.md').includes('versão 1.0.6') ? true : { ok: false, detalhe: `versão ${p.version}` };
 });
 casoSala('estático: o CHANGELOG existe e nenhum arquivo novo cita caminho de máquina', () => {
   const novos = ['scripts/instalar-sala.mjs', 'docs/boas-vindas.md', 'skills/comecar/SKILL.md', 'CHANGELOG.md', 'LICENSE'];

@@ -1,7 +1,7 @@
 {
   "name": "intoca",
   "displayName": "InToca Sede",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "InToca Sede: a camada Claude da sede InToca. Cargos e rotinas como skills, assistentes de leitura e hooks do regimento, instaláveis em qualquer pasta.",
   "author": { "name": "guigsm" },
   "license": "MIT",

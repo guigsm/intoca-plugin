@@ -11,6 +11,7 @@
 #   ferramentas     programas de terceiros ou locais, que servem a vários projetos
 #   compartilhado   pastas "_" da raiz (não são produto nem vão para deploy)
 #   rotinas         tarefas agendadas e o que executam
+#   suite           (comentado) frentes da Suíte, lidas só pela InToca Sala
 #   titulos         (comentado, no fim) padrão dos títulos dos chats de cargo
 #
 # Campos de cada projeto
@@ -25,6 +26,8 @@
 #   gerente (título do chat do gerente), fabrica (nome do projeto de que este é derivado),
 #   grupo (nome do grupo do projeto na barra lateral do app),
 #   exibicao (ferramenta: o projeto aparece como ferramenta, não como toca),
+#   suite (chave da frente da Suíte a que o projeto pertence; opcional),
+#   nas `ferramentas`: membro_de (nome do projeto a que a ferramenta é anexa; opcional),
 #   backup, observacoes.
 # Valores desconhecidos ficam null.
 # Os hooks do plugin leem deste arquivo só: nome, sigla, pasta_atual, pasta_futura, pastas_antigas,
@@ -81,6 +84,19 @@ compartilhado: []
 #     onde: 'agendador do sistema'
 #     executa: 'comando ou script'
 rotinas: []
+
+# Suíte: as ferramentas que a pessoa produz e oferece a todos os projetos, agrupadas em frentes. Opcional; só a
+# InToca Sala lê (um grupo por frente, na ordem daqui; sem o bloco, agrupa por `grupo`). Campos: nome, regra (texto
+# livre) e frentes, uma por chave: nome, descricao, membros (nomes de itens de `projetos`) e ferramentas (nomes de
+# itens de `ferramentas`). Um projeto também entra numa frente pelo campo `suite: <chave>` no item dele; uma
+# ferramenta anexa a um projeto leva `suite: <chave>` e `membro_de: <nome do projeto>` e aparece sob ele.
+# Exemplo (fictício):
+# suite:
+#   nome: 'Suíte da Padaria'
+#   regra: 'Ao entrar na Suíte, a ferramenta serve qualquer projeto por parâmetro; os sites são clientes, não membros.'
+#   frentes:
+#     producao: {nome: 'Estúdio', descricao: 'imagem e vídeo', membros: [estudio], ferramentas: ['Gerador de vinhetas']}
+#     marketing: {nome: 'Agência', descricao: 'publicação e redes', membros: [], ferramentas: ['Agenda de posts']}
 
 # Padrão de títulos dos chats de cargo (lido pelo plugin: hook chat-trocado e /intoca:comecar).
 # Marcadores, só estes: {projeto} nome do projeto; {id} identificador da OS; {tema} resumo; {funcao} função do plantão.

@@ -44,6 +44,33 @@ vez, cada uma com uma sugestão (e mais duas, **A** e **B**, a quem já tem past
 onde ficam os arquivos, o que a pessoa decide, o que vai ao GitHub, como pedir ajuda) só se ela pedir. Perfil
 `desenvolvedor`: seja breve. `iniciante`: use as analogias, sem pressa.
 
+## 2b. Conferir o Git, cedo, e dizer em uma frase
+
+Logo depois das boas-vindas e **antes das perguntas**, rode `{"acao":"verificar"}` (a mesma ação da etapa 5b; guarde o resultado e não rode
+de novo sem necessidade) e leia **só** `animada.git`. Diga **uma frase**, sem comando e sem jargão:
+- **Com Git** (`animada.git` verdadeiro): "O Git está instalado; você poderá usá-lo para guardar o histórico quando quiser."
+- **Sem Git** (falso): "O Git não está instalado; o InToca funciona sem ele, com as limitações abaixo; instalar é opcional e pode ser depois."
+
+Guarde o resultado para o fecho (etapa 9). Se a pessoa perguntar o que é o Git ou por que importa, ou se disser que não tem, mostre o
+resumo abaixo e ofereça `git-e-github.md` (seções "Por que usar o Git", "Sem Git: o que funciona e o que não" e "Como instalar o Git").
+
+**Por que vale a pena** (duas ou três frases, do jeito de empresa): o Git é o livro de registro do escritório. Ele guarda cada versão de
+cada arquivo, e por isso dá para voltar atrás; permitirá uma cópia de segurança online (o GitHub) e trabalhar em dois computadores, quando o envio chegar; deixa o
+app dar a cada tarefa uma cópia da pasta só para ela, sem uma atropelar a outra; e, quando o envio chegar, confere
+segredos antes de qualquer cópia sair da máquina. Só voltam as versões que foram registradas. Evite dizer "executor", "cartão de tarefa" e "repositório" a quem disse `nunca usei Git`. `iniciante`: use a analogia do histórico de versões de um documento.
+
+**O que muda sem Git** (lista fechada; **nada disso impede começar hoje**): funciona a sede inteira (cargos, ordens de serviço, fila,
+relatórios, rigor e a InToca Sala) e os projetos como pastas comuns. **Não** funciona: (1) voltar atrás por versão (só a lixeira do
+sistema); (2) cópia de segurança pelo GitHub e dois computadores; (3) executor em cópia isolada (cada tarefa trabalha na própria pasta, e
+dois pedidos ao mesmo tempo no mesmo projeto podem sobrescrever um ao outro); (4) a sala animada (precisa do Git para baixá-la); (5) a
+conferência de segredos antes do envio (só existe com envio).
+
+**Instalar o Git é da pessoa; você só mostra o texto, nunca roda nada.** Windows: `winget install Git.Git` ou o instalador em
+`https://git-scm.com`. macOS: `xcode-select --install` ou o site. Linux: o gerenciador de pacotes (`apt install git`, por exemplo).
+Depois: "feche e abra o Claude Code e rode `/intoca:comecar` de novo; ele vai reconhecer". **Conta no GitHub, só se a pessoa perguntar ou
+disser que quer o cofre online:** `https://github.com/signup`, conta gratuita, guarde o e-mail de recuperação, repositórios privados por
+padrão; você nunca cria a conta nem digita senha ou código, e a conta só passa a ser usada quando o envio for ligado (versão seguinte).
+
 ## 3. As perguntas, nesta ordem
 
 As sete de sempre, mais **A** e **B**, que só entram para quem já tem pastas de projeto. Uma por mensagem, com a
@@ -300,11 +327,12 @@ Não prometa que o plugin impede tudo: ele nega o que reconhece (ler ou gravar o
 
 ## 8. Git e GitHub: explicar, não executar
 
-Por perfil, explique o essencial de `git-e-github.md` (o que são, o que vai e o que não vai, privado por padrão,
-dois computadores, recuperar a conta, trocar o login do Claude, retomar o cargo). Diga que **o envio ao GitHub
+Por perfil, explique o essencial de `git-e-github.md` (o que são, por que usar o Git, o que muda sem ele, como instalá-lo, o que vai e
+o que não vai, privado por padrão, dois computadores, recuperar a conta, trocar o login do Claude, retomar o cargo). A comparação com e
+sem Git já foi dita na etapa 2b: aqui, só retome se a pessoa pedir. Diga que **o envio ao GitHub
 chega numa versão seguinte, junto com a conferência de segredos**. **Não** instrua nem rode comando de Git ou do
 GitHub CLI (iniciar repositório, fechar versão, enviar, entrar na conta, criar repositório). **Nunca** crie conta
-nem digite senha, código ou chave: isso é da pessoa.
+nem digite senha, código ou chave: isso é da pessoa. Instalar o Git e abrir a conta no GitHub também: você só mostra o texto.
 
 ## 9. Fechar
 
@@ -312,7 +340,8 @@ Resuma em três linhas (a sede, o projeto, o próximo passo: abrir o gerente) e 
 da sala: "InToca Sala: instalada (sobe sozinha nos chats novos)", "recusada (nada instalado)" ou "não feita: <motivo>"; e "sala
 animada: instalada na porta N, com hooks" / "sem hooks" / "não agora" / "faltou X". A recusa fica dita, não escondida. Diga também o que ficou da atualização, com as palavras do `fecho` do script: "atualização
 automática: ligada", "atualização: pela pessoa" (com o passo a passo e o comando `claude plugin update intoca@<catálogo>`) ou "atualização
-automática: não se aplica, catálogo local". Quem
+automática: não se aplica, catálogo local". Diga também, em uma linha, o resultado da etapa 2b: "Git: instalado" ou "Git: não instalado
+(o InToca funciona sem ele; instalar é opcional)". Quem
 começou sem projeto (`"projeto": null`) e ainda não registrou nenhuma pasta: a sede, "nenhum projeto ainda" e o
 próximo passo é registrar a primeira pasta (etapa 3b); o gerente vem depois dela.
 

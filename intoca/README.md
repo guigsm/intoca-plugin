@@ -1,4 +1,4 @@
-# InToca Sede (plugin `intoca`, versão 1.0.4)
+# InToca Sede (plugin `intoca`, versão 1.0.6)
 
 O **InToca Sede** é a camada Claude da sede InToca, empacotada como plugin do Claude Code (identificador `intoca`, comandos `/intoca:...`). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Traz os cargos e as rotinas do
 regimento como skills, os assistentes de leitura como agentes e os hooks que dão contexto, bloqueiam

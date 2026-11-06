@@ -1,6 +1,6 @@
 # Git e GitHub, em linguagem de empresa
 
-Texto de apoio do `/intoca:comecar`. Explica; não instrui comando nenhum fora da seção fechada no fim.
+Texto de apoio do `/intoca:comecar`. Explica; os únicos comandos são os de instalar o Git (que você mesmo digita) e os da seção fechada no fim.
 **Nesta versão do plugin o envio ao GitHub ainda não está ligado:** ele chega junto com a conferência
 automática de segredos que roda antes do primeiro envio. O Claude nunca cria conta nem digita senha ou código
 por você.
@@ -13,6 +13,52 @@ por você.
 - **GitHub** é um arquivo central na internet, como um cofre de documentos do escritório. Serve de cópia de
   segurança e para trabalhar em dois computadores. Precisa de uma conta sua.
 - **Commit** é "fechar uma página do livro": uma foto das mudanças, com uma frase dizendo o que mudou.
+
+## Por que usar o Git
+
+Você não precisa dele para começar, mas ele traz seis ganhos, todos em linguagem de escritório:
+
+- **Voltar atrás.** O Git guarda cada versão de cada arquivo. Errou, ou o Claude mudou o que não devia: dá para ver o que mudou e
+  recuperar uma versão anterior, como o "histórico de versões" de um documento, mas para a pasta inteira. Só voltam as versões que
+  foram registradas; o histórico começa quando alguém passa a registrar.
+- **Cópia de segurança e dois computadores.** Com uma conta no GitHub (o cofre online), a sede e os projetos terão uma cópia fora do
+  computador e poderão ser retomados em outra máquina (quando o envio chegar, numa versão seguinte).
+- **Cada tarefa na sua mesa.** O app dá a cada tarefa entregue à IA uma cópia da pasta só para ela, para duas tarefas no mesmo projeto não
+  se atropelarem. Isso só existe quando a pasta do projeto tem histórico (é um repositório, como definido acima).
+- **Conferência de segredos antes do envio.** Quando o envio ao GitHub chegar, o plugin confere senhas e chaves antes de qualquer cópia
+  sair do computador.
+- **Trabalho com outra pessoa.** Quem você convidar vê o mesmo histórico e as mesmas regras.
+- **Passagem entre chats.** O que ficou registrado (fila, ordens, relatórios) é o que um chat novo lê para continuar de onde o outro parou.
+
+## Sem Git: o que funciona e o que não
+
+**Funciona:** a sede inteira (cargos, ordens de serviço, fila, relatórios, rigor das permissões e a InToca Sala), os projetos como
+pastas comuns e o `.env` fora do que se compartilha. **Não funciona**, e a lista é esta:
+
+1. **Voltar atrás por versão.** Sobra a lixeira do sistema e as cópias que você mesmo fizer.
+2. **Cópia de segurança pelo GitHub e dois computadores** (quando o envio chegar). A cópia fica por sua conta (a nuvem de arquivos do seu computador, por exemplo).
+3. **Executor em cópia isolada.** Cada tarefa trabalha na própria pasta do projeto; dois pedidos ao mesmo tempo no mesmo projeto podem
+   sobrescrever um ao outro. Por isso, sem Git, dê um pedido de cada vez a cada projeto.
+4. **A sala animada** (a versão do painel com escritório desenhado, opcional), que precisa do Git para ser baixada. A InToca Sala clássica funciona sem ele.
+5. **A conferência de segredos antes do envio**, que só existe quando há envio.
+
+Nada disso impede começar hoje, e o que você fez continua onde está se instalar o Git depois.
+
+## Como instalar o Git
+
+Instruções para você seguir; **o Claude não instala nada nem cria conta por você**.
+
+O caminho mais simples, em qualquer sistema, é baixar o instalador em `https://git-scm.com`. Se preferir digitar um comando:
+
+- **Windows:** no PowerShell, `winget install Git.Git`.
+- **macOS:** no Terminal, `xcode-select --install`.
+- **Linux:** o gerenciador de pacotes da sua distribuição (por exemplo, `apt install git`).
+
+Depois de instalar, feche e abra o Claude Code e rode `/intoca:comecar` de novo: ele reconhece o Git.
+
+**Conta no GitHub** (só se quiser o cofre online): crie em `https://github.com/signup`; é gratuita. Guarde o e-mail de recuperação, ative
+a verificação em duas etapas (um segundo código, no celular, ao entrar) e deixe os repositórios privados. A senha e o código são só seus. A conta só passa a ser usada quando o
+envio ao GitHub for ligado, numa versão seguinte.
 
 ## O que vai e o que não vai
 

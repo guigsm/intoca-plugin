@@ -3,6 +3,20 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.0.6] - 2026-11-05
+
+### Adicionado
+- O `/intoca:comecar` confere cedo se o Git está na máquina e diz em uma frase o resultado, explica as vantagens do Git e o que muda sem
+  ele (lista fechada), mostra como instalá-lo e, só se a pessoa quiser o cofre online, o caminho da conta no GitHub, tudo como texto: o Claude
+  não instala nem cria conta. O fecho traz a linha "Git: instalado" ou "Git: não instalado". `git-e-github.md` ganha as seções "Por que
+  usar o Git", "Sem Git: o que funciona e o que não" e "Como instalar o Git".
+
+## [1.0.5] - 2026-11-05
+
+### Adicionado
+- O modelo de sede (`sede.yaml`) explica a Suíte, comentada, com exemplo fictício: a pessoa descomenta quando tiver uma e a InToca Sala
+  passa a agrupar as Tocas por frente. O manifesto de partida continua sem Suíte declarada. As boas-vindas ganham uma frase sobre isso.
+
 ## [1.0.4] - 2026-11-05
 
 ### Alterado
