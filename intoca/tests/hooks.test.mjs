@@ -2639,7 +2639,7 @@ function dimensoesDoPng(arquivo) {
   return { assinatura, largura: b.readUInt32BE(16), altura: b.readUInt32BE(20), bytes: b.length };
 }
 for (const [rotulo, raiz, versao, nomeDeExibicao, versoes] of [
-  ['intoca', PACOTE, '1.0.6', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6']],
+  ['intoca', PACOTE, '1.0.7', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7']],
   // O `intoca-sala` anda por conta própria: sem número fixo aqui, a versão sai do `plugin.json` e as versões, do `CHANGELOG.md` do pacote.
   ['intoca-sala', PACOTE_SALA, null, 'InToca Sala', null],
 ]) {
@@ -4276,40 +4276,52 @@ casoCom('estático (PLG-22): docs/windows-e-appdata.md traz o AppData virtual, o
   return faltam.length === 0 && aponta && maquina.length === 0 && d.split('\n').length <= 45
     ? true : { ok: false, detalhe: `faltam=${faltam.join(' | ')} aponta=${aponta} maquina=${maquina.join(',')} linhas=${d.split('\n').length}` };
 });
-casoCom('estático (PLG-29): a skill confere o Git cedo (ação verificar, antes das perguntas), diz as duas frases e lista as cinco limitações', () => {
+const normalizar = (s) => s.replace(/\s+/g, ' ').toLowerCase();
+casoCom('estático (PLG-29/PLG-30): a skill confere a máquina cedo (Node antes do script, depois a ação verificar), antes das perguntas, e lista as cinco limitações sem Git', () => {
   const t = lerPacote('skills/comecar/SKILL.md');
-  const ordem = ['## 2. Boas-vindas', '## 2b. Conferir o Git', '## 3. As perguntas'].map((p) => t.indexOf(p));
+  const ordem = ['## 2. Boas-vindas', '## 2b. Conferir a máquina', '## 3. As perguntas'].map((p) => t.indexOf(p));
   const crescente = ordem.every((p, i) => p >= 0 && (i === 0 || p > ordem[i - 1]));
   const etapa = t.slice(ordem[1], ordem[2]);
-  const frases = ['"acao":"verificar"', 'animada.git', 'O Git está instalado; você poderá usá-lo para guardar o histórico quando quiser',
-    'O Git não está instalado; o InToca funciona sem ele, com as limitações abaixo; instalar é opcional e pode ser depois', 'lista fechada',
+  const frases = ['"acao":"verificar"', 'animada.git', 'node --version', 'Posso instalar o X agora', 'Posso instalar agora', 'instalar.git', 'sitesOficiais', 'lista fechada',
     'voltar atrás por versão', 'cópia de segurança pelo GitHub e dois computadores', 'executor em cópia isolada', 'a sala animada', 'conferência de segredos antes do envio',
-    'nada disso impede começar hoje', 'Por que vale a pena', 'git-e-github.md'];
-  const faltam = frases.filter((f) => !etapa.toLowerCase().includes(f.toLowerCase()));
-  return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `posições=${ordem.join(',')} faltam=${faltam.join(' | ')}` };
+    'nada disso impede começar hoje', 'Por que vale a pena', 'git-e-github.md', 'Não recite as limitações a quem disse sim', 'uma pergunta por vez'];
+  const faltam = frases.filter((f) => !normalizar(etapa).includes(normalizar(f)));
+  const nodeAntes = etapa.indexOf('node --version') >= 0 && etapa.indexOf('node --version') < etapa.indexOf('{"acao":"verificar"}');
+  return crescente && faltam.length === 0 && nodeAntes ? true : { ok: false, detalhe: `posições=${ordem.join(',')} faltam=${faltam.join(' | ')} nodeAntes=${nodeAntes}` };
 });
-casoCom('estático (PLG-29): a skill mostra a instalação do Git por sistema e a conta do GitHub só como texto, e fecha com a linha do Git', () => {
+casoCom('estático (PLG-30): a skill aplica a política com o "sim" da pessoa (Node ausente para o começo e manda reabrir; Git ausente com sim e com não), a conta do GitHub fica da pessoa e o fecho tem uma linha por programa', () => {
   const t = lerPacote('skills/comecar/SKILL.md');
-  const etapa = t.slice(t.indexOf('## 2b.'), t.indexOf('## 3. As perguntas'));
-  const frases = ['winget install Git.Git', 'https://git-scm.com', 'xcode-select --install', 'apt install git', 'feche e abra o Claude Code e rode `/intoca:comecar` de novo',
-    'https://github.com/signup', 'só se a pessoa perguntar', 'você nunca cria a conta nem digita senha ou código', 'nunca roda nada'];
-  const faltam = frases.filter((f) => !etapa.includes(f));
+  const etapa = normalizar(t.slice(t.indexOf('## 2b.'), t.indexOf('## 3. As perguntas')));
+  const frases = ['presuma e siga', 'winget install OpenJS.NodeJS.LTS', 'brew install node', 'sudo apt install -y nodejs npm', 'https://nodejs.org', 'pare o começo aqui',
+    'feche e abra o Claude Code (ou o terminal) e rode `/intoca:comecar` de novo', 'não repita o instalador', 'você roda o instalador do sistema',
+    'Git: instalado hoje', 'Git: recusado', 'https://github.com/signup', 'só se a pessoa perguntar', 'você nunca cria a conta nem digita senha ou código',
+    'conta, senha, código e chave são sempre da pessoa', 'nunca pergunta se a pessoa tem o programa'];
+  const faltam = frases.filter((f) => !etapa.includes(normalizar(f)));
   const fecho = t.slice(t.indexOf('## 9. Fechar'), t.indexOf('## Regras'));
-  const linha = fecho.includes('"Git: instalado"') && fecho.includes('Git: não instalado') && fecho.includes('instalar é opcional');
+  const linhas = ['"Git: já estava"', '"Git: instalado hoje', '"Git: recusado; o InToca funciona sem ele"', '"Node: 24"'].filter((f) => !fecho.includes(f));
   const etapa8 = t.slice(t.indexOf('## 8. Git e GitHub'), t.indexOf('## 9.'));
-  const oito = etapa8.includes('explicar, não executar') && etapa8.includes('**Não** instrua nem rode comando de Git') && etapa8.includes('só mostra o texto');
-  const naoRoda = /Nunca instale `git`/.test(t);
-  return faltam.length === 0 && linha && oito && naoRoda ? true : { ok: false, detalhe: `faltam=${faltam.join(' | ')} fecho=${linha} etapa8=${oito} regra=${naoRoda}` };
+  const oito = etapa8.includes('explicar, não executar') && etapa8.includes('**Não** instrua nem rode comando de Git') && etapa8.includes('você só mostra o texto') && etapa8.includes('você o instala com o "sim" da pessoa');
+  const regras = t.slice(t.indexOf('## Regras'));
+  const regra = regras.includes('Posso instalar o X agora?') && regras.includes('só depois do "sim"') && regras.includes('só da pessoa');
+  return faltam.length === 0 && linhas.length === 0 && oito && regra ? true : { ok: false, detalhe: `faltam=${faltam.join(' | ')} fecho=${linhas.join('|')} etapa8=${oito} regra=${regra}` };
 });
-casoCom('estático (PLG-29): git-e-github.md tem as três seções novas, a boas-vindas aponta e nenhum comando de Git (init, commit, push) aparece fora da seção fechada', () => {
+casoCom('estático (PLG-30): nenhum texto do pacote diz que o Claude não instala programas, nem pergunta se a pessoa tem o programa, nem deixa a instalação só com a pessoa', () => {
+  const proibidos = [/o claude não instala/i, /nunca instale/i, /sem instalar por conta própria/i, /nunca roda nada/i, /instalar é da pessoa/i, /você tem (o |a )?(git|node|uv|python)/i,
+    /tem (o )?(git|node|uv|python) instalado\?/i, /que você mesmo digita/i, /não instala nenhum/i];
+  const achados = arquivosDoPacote().filter((r) => !r.startsWith('tests/') && r !== 'CHANGELOG.md' && /\.(md|mjs|json|yaml)$/i.test(r))
+    .flatMap((rel) => { const tx = lerPacote(rel); return proibidos.filter((p) => p.test(tx)).map((p) => `${rel}: ${p}`); });
+  return achados.length === 0 ? true : { ok: false, detalhe: achados.join('; ') };
+});
+casoCom('estático (PLG-29/PLG-30): git-e-github.md tem as três seções, a política nova (o Claude instala com o "sim"; conta e senha são da pessoa), a boas-vindas aponta e nenhum comando de Git (init, commit, push) aparece fora da seção fechada', () => {
   const g = lerPacote('docs/git-e-github.md');
-  const secoes = ['## Por que usar o Git', '## Sem Git: o que funciona e o que não', '## Como instalar o Git'];
+  const secoes = ['## Por que usar o Git', '## Sem Git: o que funciona e o que não', '## Instalar o Git: o Claude faz com a sua autorização'];
   const pos = secoes.map((s) => g.indexOf(s));
   const crescente = pos.every((p, i) => p >= 0 && (i === 0 || p > pos[i - 1]));
   const sem = g.slice(pos[1], pos[2]);
   const limites = ['Voltar atrás por versão', 'GitHub e dois computadores', 'Executor em cópia isolada', 'A sala animada', 'conferência de segredos antes do envio'].filter((f) => !sem.includes(f));
-  const como = g.slice(pos[2], g.indexOf('## O que vai e o que não vai'));
-  const sistemas = ['winget install Git.Git', 'https://git-scm.com', 'xcode-select --install', 'apt install git', 'https://github.com/signup', 'o Claude não instala nada'].filter((f) => !como.includes(f));
+  const como = normalizar(g.slice(pos[2], g.indexOf('## O que vai e o que não vai')));
+  const sistemas = ['winget install Git.Git', 'https://git-scm.com', 'xcode-select --install', 'brew install git', 'sudo apt install -y git', 'https://github.com/signup', 'Posso instalar agora',
+    'com o seu "sim"', 'conta e senha são só suas', 'winget install OpenJS.NodeJS.LTS', 'versão 20 ou mais nova'].filter((f) => !como.includes(normalizar(f)));
   const b = lerPacote('docs/boas-vindas.md');
   const secao6 = b.slice(b.indexOf('## 6.'), b.indexOf('## 7.'));
   const aponta = secao6.includes('O Git é opcional') && secao6.includes('git-e-github.md');
@@ -4365,11 +4377,11 @@ casoCom('estático: boas-vindas tem o resumo e as sete seções; git-e-github co
   const faltam = [...secoes.filter((s) => !b.includes(s)), ...temas.filter((s) => !g.includes(s))];
   return faltam.length === 0 ? true : { ok: false, detalhe: faltam.join(' | ') };
 });
-casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.0.6', () => {
+casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.0.7', () => {
   const r = lerPacote('README.md');
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
   const faltam = ['/intoca:comecar', '.intoca/sede', 'titulos', 'criar-sede.mjs', 'INTOCA_HOME'].filter((t) => !r.includes(t));
-  return faltam.length === 0 && p.version === '1.0.6' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
+  return faltam.length === 0 && p.version === '1.0.7' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
 });
 casoCom('estático: o script não grava fora do que o regimento permite (sem rm nem cópia; o único rename é o do mover; escrita só com wx)', () => {
   const t = lerPacote('scripts/criar-sede.mjs').replace('renameSync, realpathSync } from', 'realpathSync } from').replace('renomear: renameSync', 'renomear: null');
@@ -5688,7 +5700,7 @@ function cenarioSala() {
 
 // Os processos falsos. `o` escolhe o que a máquina "tem" e como cada passo termina; `chamadas` guarda tudo o que foi pedido.
 function falsos(c, o = {}) {
-  const e = { git: true, uv: true, python: true, claude: true, plugins: [], clone: 'ok', sync: 'ok', hooks: 'ok', instalar: 'ok', origem: null, ...o };
+  const e = { git: true, uv: true, python: true, claude: true, plugins: [], clone: 'ok', sync: 'ok', hooks: 'ok', instalar: 'ok', origem: null, gerenciadores: [], ...o };
   const chamadas = [];
   const rodar = (cmd, args, op = {}) => {
     const nome = String(cmd);
@@ -5725,6 +5737,7 @@ function falsos(c, o = {}) {
       if (args[0] === 'python') return e.python ? ok(`${join(c.base, 'py', 'python.exe')}\n`) : falha('No interpreter found');
       if (args[0] === 'sync') return e.sync === 'ok' ? ok() : falha('error: failed to resolve dependencies');
     }
+    if (e.gerenciadores.includes(nome) && args[0] === '--version') return ok(`${nome} 1.0`);
     if (/python(\.exe)?$/i.test(nome) && args[0] === '--version') return ok('Python 3.12.4');
     if (args.includes('hooks-install')) {
       const alvo = args[args.indexOf('--settings') + 1];
@@ -5746,7 +5759,7 @@ const comCasa = (c, fn) => { // o script acha a pasta pessoal por INTOCA_HOME: a
   process.env.INTOCA_HOME = c.casa;
   try { return fn(); } finally { if (antes === undefined) delete process.env.INTOCA_HOME; else process.env.INTOCA_HOME = antes; }
 };
-const rodarSala = (entrada, c, f) => comCasa(c, () => executarSala(entrada, { rodar: f.rodar, portaLivre: f.portaLivre, url: f.url, claude: f.claude }));
+const rodarSala = (entrada, c, f, extra = {}) => comCasa(c, () => executarSala(entrada, { rodar: f.rodar, portaLivre: f.portaLivre, url: f.url, claude: f.claude, ...extra }));
 const sobAnimada = (c, extra = {}) => ({ acao: 'animada', sede: c.sede, pasta: c.destino, porta: 8765, ...extra });
 const erroDe = (r, codigo) => (r.ok === false && r.erros?.some((x) => x.codigo === codigo) ? true : { ok: false, detalhe: `esperava ${codigo}; veio ${JSON.stringify(r).slice(0, 300)}` });
 const dado = (r) => (r.ok === true && r.erros.length === 0 ? true : { ok: false, detalhe: JSON.stringify(r).slice(0, 400) });
@@ -5773,6 +5786,77 @@ casoSala('verificar: uv sem Python 3.12 aponta só o Python', () => {
   const c = cenarioSala();
   const r = rodarSala({ acao: 'verificar' }, c, falsos(c, { python: false }));
   return todos(dado(r), r.animada.faltam.join() === 'python' ? true : { ok: false, detalhe: r.animada.faltam.join() });
+});
+
+// PLG-30: a máquina e os comandos de instalação por sistema. O script só devolve o comando; quem roda é o Claude, depois do "sim".
+const COMANDOS_ESPERADOS = [
+  ['win32', ['winget'], 'windows', 'winget', { git: 'winget install Git.Git', node: 'winget install OpenJS.NodeJS.LTS', uv: 'winget install astral-sh.uv', python: 'uv python install 3.12' }],
+  ['win32', [], 'windows', null, { git: null, node: null, uv: null, python: 'uv python install 3.12' }],
+  ['darwin', ['brew'], 'macos', 'brew', { git: 'brew install git', node: 'brew install node', uv: 'brew install uv', python: 'uv python install 3.12' }],
+  ['darwin', [], 'macos', null, { git: 'xcode-select --install', node: null, uv: null, python: 'uv python install 3.12' }],
+  ['linux', ['apt-get'], 'linux', 'apt', { git: 'sudo apt install -y git', node: 'sudo apt install -y nodejs npm', uv: null, python: 'uv python install 3.12' }],
+  ['linux', ['dnf'], 'linux', 'dnf', { git: 'sudo dnf install -y git', node: 'sudo dnf install -y nodejs', uv: null, python: 'uv python install 3.12' }],
+  ['linux', ['pacman'], 'linux', 'pacman', { git: 'sudo pacman -S --noconfirm git', node: 'sudo pacman -S --noconfirm nodejs npm', uv: null, python: 'uv python install 3.12' }],
+  ['linux', [], 'linux', null, { git: null, node: null, uv: null, python: 'uv python install 3.12' }],
+];
+for (const [plataforma, presentes, sistema, gerenciador, comandos] of COMANDOS_ESPERADOS) {
+  casoSala(`verificar (PLG-30): em ${sistema} com ${gerenciador ?? 'nenhum gerenciador'}, devolve o gerenciador e o comando de cada programa (nada é instalado)`, () => {
+    const c = cenarioSala();
+    const f = falsos(c, { gerenciadores: presentes });
+    const r = rodarSala({ acao: 'verificar' }, c, f, { plataforma });
+    const instalouAlgo = f.chamadas.some((x) => x.args.includes('install') || x.args.includes('-S') || x.args.includes('--install'));
+    return todos(dado(r), r.maquina.sistema === sistema && r.maquina.gerenciador === gerenciador ? true : { ok: false, detalhe: JSON.stringify(r.maquina) },
+      JSON.stringify(r.instalar) === JSON.stringify(comandos) ? true : { ok: false, detalhe: JSON.stringify(r.instalar) },
+      instalouAlgo ? { ok: false, detalhe: 'o script rodou um instalador' } : true);
+  });
+}
+casoSala('verificar (PLG-30): sem o uv não há comando para o Python; os sites oficiais acompanham os comandos', () => {
+  const c = cenarioSala();
+  const r = rodarSala({ acao: 'verificar' }, c, falsos(c, { uv: false, gerenciadores: ['winget'] }), { plataforma: 'win32' });
+  return todos(dado(r), r.instalar.python === null && r.instalar.uv === 'winget install astral-sh.uv' ? true : { ok: false, detalhe: JSON.stringify(r.instalar) },
+    ['git', 'node', 'uv', 'python'].every((k) => /^https:\/\//.test(r.sitesOficiais[k])) ? true : { ok: false, detalhe: JSON.stringify(r.sitesOficiais) });
+});
+casoSala('verificar (PLG-30): o Node vem de process.version, o mínimo é o 20 e abaixo dele o aviso aparece', () => {
+  const c = cenarioSala();
+  const real = rodarSala({ acao: 'verificar' }, c, falsos(c));
+  const velho = rodarSala({ acao: 'verificar' }, c, falsos(c), { versaoDoNode: 'v18.19.0' });
+  const limite = rodarSala({ acao: 'verificar' }, c, falsos(c), { versaoDoNode: '20.0.0' });
+  return todos(dado(real), real.maquina.node.ok === true && real.maquina.node.versao === process.version.replace(/^v/, '') && real.maquina.node.minimo === 20 ? true : { ok: false, detalhe: JSON.stringify(real.maquina.node) },
+    velho.maquina.node.versao === '18.19.0' && velho.maquina.node.abaixoDoMinimo === true ? true : { ok: false, detalhe: JSON.stringify(velho.maquina.node) },
+    limite.maquina.node.abaixoDoMinimo === false ? true : { ok: false, detalhe: JSON.stringify(limite.maquina.node) });
+});
+casoSala('verificar (PLG-30): o claude vem de CLAUDE_CODE_EXECPATH, depois do PATH, e a origem é dita', () => {
+  const c = cenarioSala();
+  const doApp = join(c.base, 'app', 'claude-do-app');
+  const ausente = { status: null, stdout: '', stderr: '', erro: 'ENOENT' };
+  const rodar = (ativos) => (cmd, args) => (ativos.includes(String(cmd)) && args[0] === '--version' ? { status: 0, stdout: '2.1.0 (Claude Code)', stderr: '', erro: null } : ausente);
+  const chama = (ativos, execpath) => {
+    const antes = process.env.CLAUDE_CODE_EXECPATH;
+    if (execpath === undefined) delete process.env.CLAUDE_CODE_EXECPATH; else process.env.CLAUDE_CODE_EXECPATH = execpath;
+    try { return comCasa(c, () => executarSala({ acao: 'verificar' }, { rodar: rodar(ativos), portaLivre: () => true, claude: null })).maquina.claude; } finally {
+      if (antes === undefined) delete process.env.CLAUDE_CODE_EXECPATH; else process.env.CLAUDE_CODE_EXECPATH = antes;
+    }
+  };
+  const app = chama([doApp, 'claude'], doApp);
+  const path = chama(['claude'], undefined);
+  const quebrado = chama(['claude'], doApp);
+  const nenhum = chama([], doApp);
+  return todos(app.ok && app.origem === 'CLAUDE_CODE_EXECPATH' && app.caminho === doApp ? true : { ok: false, detalhe: JSON.stringify(app) },
+    path.ok && path.origem === 'PATH' && path.caminho === 'claude' ? true : { ok: false, detalhe: JSON.stringify(path) },
+    quebrado.ok && quebrado.origem === 'PATH' ? true : { ok: false, detalhe: JSON.stringify(quebrado) },
+    nenhum.ok === false && nenhum.caminho === null && nenhum.origem === null ? true : { ok: false, detalhe: JSON.stringify(nenhum) });
+});
+casoSala('animada (PLG-30): sem git, sem uv ou sem Python, o erro traz o comando do sistema para a skill oferecer com o "sim"', () => {
+  const c = cenarioSala();
+  const f = falsos(c, { git: false, gerenciadores: ['winget'] });
+  const semGit = rodarSala(sobAnimada(c), c, f, { plataforma: 'win32' });
+  const semUv = rodarSala(sobAnimada(c), c, falsos(c, { uv: false, gerenciadores: ['brew'] }), { plataforma: 'darwin' });
+  const semPy = rodarSala(sobAnimada(c), c, falsos(c, { python: false }), { plataforma: 'linux' });
+  const e = (r) => r.erros?.[0] ?? {};
+  return todos(e(semGit).codigo === 'sem-git' && e(semGit).comando === 'winget install Git.Git' && /Ofereça/.test(e(semGit).mensagem) && !/Instale-o/.test(e(semGit).mensagem) ? true : { ok: false, detalhe: JSON.stringify(e(semGit)) },
+    e(semUv).codigo === 'sem-uv' && e(semUv).comando === 'brew install uv' ? true : { ok: false, detalhe: JSON.stringify(e(semUv)) },
+    e(semPy).codigo === 'sem-python' && e(semPy).comando === 'uv python install 3.12' ? true : { ok: false, detalhe: JSON.stringify(e(semPy)) },
+    clonou(f) ? { ok: false, detalhe: 'clonou' } : true);
 });
 
 // ------------------------------ a InToca Sala (pacote intoca-sala)
@@ -6229,7 +6313,7 @@ casoSala('estático: a skill comecar tem as etapas 5b e 5c: sobe sozinha, como d
   const frases = ['instalar-sala.mjs', '"acao":"verificar"', '"acao":"sala"', '"acao":"animada"', '"recusou":true', 'Sobe sozinha nos chats novos', 'INTOCA_SALA_SEM_LANCADOR=1',
     '"lancador": false', 'quadro de avisos', 'num passo só', 'Pergunte, nunca imponha', 'guarde a recusa para o fecho', 'git', '`uv`', '3.12', '8765', 'Oferece, nunca impõe',
     'nunca é efeito de instalar o plugin', 'Os hooks, à parte, com consentimento próprio', 'guarda uma cópia', 'settings.json', '"confirmado":true', 'plugin_minimo', 'avisoDeVersao',
-    'Nunca instale `git`', 'não inicia'];
+    'Posso instalar o X agora', 'não inicia'];
   const faltam = frases.filter((f) => !t.toLowerCase().includes(f.toLowerCase()));
   return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `posições=${ordem.join(',')} faltam=${faltam.join(' | ')}` };
 });
@@ -6237,7 +6321,7 @@ casoSala('estático: a skill relata a recusa ao fim e a regra "sem instalar nada
   const t = lerPacote('skills/comecar/SKILL.md');
   const fecho = t.slice(t.indexOf('## 9. Fechar'));
   const regras = t.slice(t.indexOf('## Regras'));
-  return /recusada \(nada instalado\)/.test(fecho) && /não agora/.test(fecho) && /salvo\*\* as etapas 5b e 5c/.test(regras) && !/Sem rede, sem instalar nada\./.test(regras)
+  return /recusada \(nada instalado\)/.test(fecho) && /não agora/.test(fecho) && /salvo\*\* as etapas 2b, 5b e 5c/.test(regras) && !/Sem rede, sem instalar nada\./.test(regras)
     ? true : { ok: false, detalhe: 'fecho ou regra sem a exceção' };
 });
 casoSala('estático: README e boas-vindas citam a sala, o lançador, como desligar, a Animada opcional, o consentimento dos hooks e o plugin_minimo', () => {
@@ -6272,9 +6356,9 @@ casoSala('estático: sem rede própria, git nunca pergunta usuário (o clone é 
   return rede.length === 0 && t.includes("GIT_TERMINAL_PROMPT: '0'") && segredo.length === 0
     ? true : { ok: false, detalhe: `rede=${rede.join()} segredo=${segredo.join()}` };
 });
-casoSala('estático: plugin.json na 1.0.6 e o README do pacote traz a versão', () => {
+casoSala('estático: plugin.json na 1.0.7 e o README e o CHANGELOG do pacote trazem a versão', () => {
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
-  return p.version === '1.0.6' && lerPacote('README.md').includes('versão 1.0.6') ? true : { ok: false, detalhe: `versão ${p.version}` };
+  return p.version === '1.0.7' && lerPacote('README.md').includes('versão 1.0.7') && lerPacote('CHANGELOG.md').includes('## [1.0.7] - ') ? true : { ok: false, detalhe: `versão ${p.version}` };
 });
 casoSala('estático: o CHANGELOG existe e nenhum arquivo novo cita caminho de máquina', () => {
   const novos = ['scripts/instalar-sala.mjs', 'docs/boas-vindas.md', 'skills/comecar/SKILL.md', 'CHANGELOG.md', 'LICENSE'];

@@ -1,9 +1,10 @@
 # Git e GitHub, em linguagem de empresa
 
-Texto de apoio do `/intoca:comecar`. Explica; os únicos comandos são os de instalar o Git (que você mesmo digita) e os da seção fechada no fim.
+Texto de apoio do `/intoca:comecar`. Explica; os únicos comandos são os de instalar o Git (que o Claude roda com a sua autorização, ou que você
+digita, se preferir) e os da seção fechada no fim.
 **Nesta versão do plugin o envio ao GitHub ainda não está ligado:** ele chega junto com a conferência
-automática de segredos que roda antes do primeiro envio. O Claude nunca cria conta nem digita senha ou código
-por você.
+automática de segredos que roda antes do primeiro envio. O Claude instala programas com a sua autorização, mas nunca cria
+conta nem digita senha ou código por você.
 
 ## O que são
 
@@ -44,17 +45,25 @@ pastas comuns e o `.env` fora do que se compartilha. **Não funciona**, e a list
 
 Nada disso impede começar hoje, e o que você fez continua onde está se instalar o Git depois.
 
-## Como instalar o Git
+## Instalar o Git: o Claude faz com a sua autorização
 
-Instruções para você seguir; **o Claude não instala nada nem cria conta por você**.
+O `/intoca:comecar` confere sozinho se o Git está no computador e **não pergunta se você o tem**. Se ele já está, o Claude segue. Se falta, o
+Claude diz para que serve, pergunta "Posso instalar agora?" e, **com o seu "sim"**, roda o instalador do seu sistema e confere de novo. Sem o
+"sim", nada é instalado e o InToca funciona sem ele, com as limitações acima. **O Claude instala programas com a sua autorização; conta e senha
+são só suas.** Você também pode pedir ao Claude, a qualquer hora: "confira o Git e instale se faltar".
 
-O caminho mais simples, em qualquer sistema, é baixar o instalador em `https://git-scm.com`. Se preferir digitar um comando:
+O comando que ele usa, por sistema (se preferir, digite você mesmo):
 
-- **Windows:** no PowerShell, `winget install Git.Git`.
-- **macOS:** no Terminal, `xcode-select --install`.
-- **Linux:** o gerenciador de pacotes da sua distribuição (por exemplo, `apt install git`).
+- **Windows:** no PowerShell, `winget install Git.Git`. O Windows pode abrir uma janela pedindo permissão: quem clica é você.
+- **macOS:** com o Homebrew, `brew install git`; sem ele, `xcode-select --install` (abre uma janela do sistema; você confirma lá).
+- **Linux:** o gerenciador da distribuição (no Debian e no Ubuntu, `sudo apt install -y git`). Comando com `sudo` pede a senha de administrador: o
+  Claude não a digita; ele mostra o comando e você o roda no seu terminal.
+- **Qualquer sistema, sem gerenciador:** baixe o instalador em `https://git-scm.com`.
 
-Depois de instalar, feche e abra o Claude Code e rode `/intoca:comecar` de novo: ele reconhece o Git.
+Depois de instalar, feche e abra o Claude Code (ou o terminal) e rode `/intoca:comecar` de novo: a conversa que estava aberta não enxerga o que
+foi instalado depois que ela abriu, e a nova reconhece o Git. O mesmo vale para o Node, que o InToca também precisa (versão 20 ou mais nova) e
+que o Claude instala do mesmo jeito, com o seu "sim": no Windows, `winget install OpenJS.NodeJS.LTS`; no macOS, `brew install node`; no Linux,
+`sudo apt install -y nodejs npm`, ou o instalador de `https://nodejs.org`.
 
 **Conta no GitHub** (só se quiser o cofre online): crie em `https://github.com/signup`; é gratuita. Guarde o e-mail de recuperação, ative
 a verificação em duas etapas (um segundo código, no celular, ao entrar) e deixe os repositórios privados. A senha e o código são só seus. A conta só passa a ser usada quando o

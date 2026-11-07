@@ -1,7 +1,7 @@
 {
   "name": "intoca-sala",
   "displayName": "InToca Sala",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "InToca Sala: o quadro de avisos do escritório dentro do app (painel de OS, recursos e pendências, status da OS, faixa de pendências e /pendencias) e a página das Tocas no navegador, com lançador e serviço de logon opcional. Somente leitura; acesso antecipado.",
   "author": { "name": "guigsm" },
   "license": "MIT",

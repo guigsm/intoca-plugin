@@ -49,13 +49,25 @@ Campos opcionais do projeto no `sede.yaml` (a Diretoria grava; sem eles a sala n
 
 O VS Code abre `vscode://file/<pasta_atual>` (barras normais, trechos codificados), sem depender de arquivo `.code-workspace`.
 
-**Pasta estática** em `/toca/<nome>/` (só leitura): só GET e HEAD; sem listar pasta (`index.html` ou 404); recusa `..`,
-`%2e%2e`, `\`, `:`, byte nulo, nome oculto (`.env`, `.git`) e qualquer link simbólico ou junção cuja pasta real saia da
-declarada; tipo pela extensão com `nosniff`; arquivo acima de 50 MB devolve 413. Toda resposta leva
-`Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`: a página roda em origem opaca e **não consegue**
-chamar a API da sala (o navegador bloqueia o pedido com `X-Painel`) nem usar `localStorage`. Além disso o servidor recusa
-`POST` com `Origin` estrangeiro ou `Sec-Fetch-Site` diferente de same-origin. Limite: links que começam com `/` (raiz do site)
-apontam para a raiz da sala, não para a pasta; use links relativos.
+### Pasta estática
+
+Cada Toca com `site:` é servida em **origem própria**: `http://<rótulo>.toca.localhost/` (com `:porta` quando a sala não está na
+80), a partir da raiz da pasta. O navegador (Chromium, Firefox) trata `*.localhost` como a própria máquina, sem configuração. O
+campo `estatico` de `/api/tocas` já traz essa URL absoluta, e o endereço antigo `/toca/<nome>/...` em `localhost` responde 301
+para ela.
+
+- **Rótulo.** Vem do nome do projeto no manifesto: minúsculas; toda sequência fora de `a-z`, `0-9`, `.` e `-` vira um `-`; pontos
+  e hífens das pontas saem (`Padaria do Amigo` → `padaria-do-amigo.toca.localhost`). Rótulo vazio, ou igual ao de outra Toca com
+  site, não é servido (404 com o motivo) e a Toca fica sem `estatico`.
+- **Por que origem própria, e não `sandbox`.** O `Content-Security-Policy: sandbox` punha a página em origem opaca: links que
+  começam com `/` quebravam e o navegador interno do app barrava o CSS e o JS. Em origem própria o site funciona como em produção.
+  A separação da API vem da origem: a API só responde em `Host` de localhost e recusa `Origin` e `Sec-Fetch-Site` de fora, e na
+  origem do site `/api/...` e `/` são arquivos do site (ou 404), nunca a sala.
+- **Regras da pasta (só leitura).** Só GET e HEAD; sem listar pasta (`index.html` ou 404); pasta sem a barra final responde 301
+  para a forma com barra; recusa `..`, `%2e%2e`, `\`, `:`, byte nulo, nome oculto (`.env`, `.git`) e qualquer link simbólico ou
+  junção cuja pasta real saia da declarada; tipo pela extensão com `nosniff`; arquivo acima de 50 MB devolve 413.
+- **Navegador que não resolve `*.localhost`.** Se um navegador antigo não abrir o endereço, a pessoa acrescenta
+  `127.0.0.1 <rótulo>.toca.localhost` ao arquivo `hosts` (o Claude não faz isso por ela).
 
 ## API
 

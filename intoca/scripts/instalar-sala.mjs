@@ -8,10 +8,13 @@
 // Este script NUNCA roda sozinho: quem o chama é a skill comecar, depois do "sim" da pessoa. Instalar o plugin
 // não dispara nada daqui. A rede só é usada pelos dois comandos que a pessoa autorizou, e só no passo real:
 // o `claude plugin install` (a sala dentro do app) e o `git clone` (a sala animada). Nada é baixado em silêncio.
+// Os programas do sistema (Git, Node, uv, Python) este script NUNCA instala: a ação `verificar` só devolve, por sistema,
+// o comando pronto (`instalar`); quem o roda é o Claude, no Bash ou no PowerShell, depois do "sim" da pessoa.
 //
 // Ações (campo "acao"):
-//   verificar  só lê: acha o `claude`, vê se o `intoca` e o `intoca-sala` estão instalados e confere `git`, `uv`
-//              e Python 3.12 ou mais novo (o que a sala animada pede).
+//   verificar  só lê: acha o `claude` (CLAUDE_CODE_EXECPATH ou PATH), vê se o `intoca` e o `intoca-sala` estão instalados e
+//              confere `git`, `uv` e Python 3.12 ou mais novo (o que a sala animada pede). Devolve também `maquina` (sistema,
+//              gerenciador de pacotes, Node e Claude) e `instalar` (o comando de cada programa nesse sistema, ou null).
 //   sala       instala o pacote `intoca-sala` do mesmo catálogo do `intoca`, num passo só (se o `intoca` também
 //              faltasse, vão os dois). Só simula, a menos que a entrada diga "simular": false e "confirmado": true.
 //              "recusou": true registra a recusa da pessoa e não toca em nada.
@@ -66,22 +69,26 @@ export function portaLivre(porta) {
   return r.status === 0;
 }
 
-const DEPS_PADRAO = { rodar: rodarPrograma, portaLivre, url: URL_DA_ANIMADA, claude: null, tempoDoClone: 180000, tempoDoSync: 900000 };
+// `plataforma` e `versaoDoNode` existem para os testes simularem outro sistema e outro Node.
+const DEPS_PADRAO = { rodar: rodarPrograma, portaLivre, url: URL_DA_ANIMADA, claude: null, plataforma: null, versaoDoNode: null, tempoDoClone: 180000, tempoDoSync: 900000 };
+export const NODE_MINIMO = 20;
 
 // ------------------------------------------------------------ o que há na máquina
 
 const primeiraLinha = (t) => String(t ?? '').split(/\r?\n/).map((l) => l.trim()).find((l) => l !== '') ?? '';
 
 // O binário do Claude: o que o app informa em CLAUDE_CODE_EXECPATH, depois o `claude` do PATH. Nada é procurado em disco.
-function acharClaude(d) {
-  if (d.claude) return d.claude;
-  const candidatos = [process.env.CLAUDE_CODE_EXECPATH, 'claude'].filter((c) => typeof c === 'string' && c !== '');
-  for (const c of candidatos) {
-    const r = d.rodar(c, ['--version'], { tempo: 20000 });
-    if (r.status === 0) return c;
+// Devolve { caminho, origem } (origem: 'CLAUDE_CODE_EXECPATH' ou 'PATH') ou null.
+function localizarClaude(d) {
+  if (d.claude) return { caminho: d.claude, origem: d.claude === 'claude' ? 'PATH' : 'CLAUDE_CODE_EXECPATH' };
+  const candidatos = [[process.env.CLAUDE_CODE_EXECPATH, 'CLAUDE_CODE_EXECPATH'], ['claude', 'PATH']].filter(([c]) => typeof c === 'string' && c !== '');
+  for (const [caminho, origem] of candidatos) {
+    const r = d.rodar(caminho, ['--version'], { tempo: 20000 });
+    if (r.status === 0) return { caminho, origem };
   }
   return null;
 }
+const acharClaude = (d) => localizarClaude(d)?.caminho ?? null;
 
 function listaDePlugins(claude, d) {
   const r = d.rodar(claude, ['plugin', 'list', '--json'], { tempo: 60000 });
@@ -112,8 +119,62 @@ function conferirPython(d, temUv) {
   return { ok: true, versao: v.status === 0 ? primeiraLinha(v.stdout || v.stderr) : null, caminho };
 }
 
+// ------------------------------------------------------------ gerenciador de pacotes e comandos de instalação
+
+const SITES_OFICIAIS = {
+  git: 'https://git-scm.com',
+  node: 'https://nodejs.org',
+  uv: 'https://docs.astral.sh/uv/getting-started/installation/',
+  python: 'https://www.python.org/downloads/',
+};
+
+// Gerenciadores que o script reconhece por sistema, na ordem de preferência (nome, programa a testar). Só roda `--version`:
+// sem rede e sem instalar.
+const GERENCIADORES = {
+  win32: [['winget', 'winget']],
+  darwin: [['brew', 'brew']],
+  linux: [['apt', 'apt-get'], ['dnf', 'dnf'], ['pacman', 'pacman']],
+};
+
+const nomeDoSistema = (plataforma) => ({ win32: 'windows', darwin: 'macos', linux: 'linux' })[plataforma] ?? plataforma;
+
+function acharGerenciador(d, plataforma) {
+  for (const [nome, programa] of GERENCIADORES[plataforma] ?? []) {
+    if (d.rodar(programa, ['--version'], { tempo: 20000 }).status === 0) return nome;
+  }
+  return null;
+}
+
+// O comando pronto de cada programa, para este sistema e este gerenciador; null onde não há como instalar por comando
+// (a pessoa vai ao site oficial, em `sitesOficiais`). O Python depende do `uv`: sem ele, null.
+function comandosDeInstalacao(plataforma, gerenciador, temUv) {
+  const porGerenciador = {
+    winget: { git: 'winget install Git.Git', node: 'winget install OpenJS.NodeJS.LTS', uv: 'winget install astral-sh.uv' },
+    brew: { git: 'brew install git', node: 'brew install node', uv: 'brew install uv' },
+    apt: { git: 'sudo apt install -y git', node: 'sudo apt install -y nodejs npm', uv: null },
+    dnf: { git: 'sudo dnf install -y git', node: 'sudo dnf install -y nodejs', uv: null },
+    pacman: { git: 'sudo pacman -S --noconfirm git', node: 'sudo pacman -S --noconfirm nodejs npm', uv: null },
+  };
+  const base = { git: null, node: null, uv: null, ...(porGerenciador[gerenciador] ?? {}) };
+  if (plataforma === 'darwin' && !gerenciador) base.git = 'xcode-select --install'; // sem Homebrew, o Git vem das ferramentas da Apple
+  return { ...base, python: temUv ? 'uv python install 3.12' : null };
+}
+
+function maquinaDe(d, claude) {
+  const plataforma = d.plataforma ?? process.platform;
+  const versao = String(d.versaoDoNode ?? process.version).replace(/^v/, '');
+  const maior = Number.parseInt(versao, 10);
+  return {
+    sistema: nomeDoSistema(plataforma), plataforma, gerenciador: acharGerenciador(d, plataforma),
+    // O script só roda com Node: aqui `ok` é sempre verdadeiro. Abaixo do mínimo, o fecho avisa.
+    node: { ok: true, versao, minimo: NODE_MINIMO, abaixoDoMinimo: Number.isFinite(maior) && maior < NODE_MINIMO },
+    claude: { ok: Boolean(claude), caminho: claude?.caminho ?? null, origem: claude?.origem ?? null },
+  };
+}
+
 function verificar(d) {
-  const claude = acharClaude(d);
+  const achado = localizarClaude(d);
+  const claude = achado?.caminho ?? null;
   const lista = claude ? listaDePlugins(claude, d) : null;
   const intoca = acharPlugin(lista, 'intoca');
   const sala = acharPlugin(lista, 'intoca-sala');
@@ -124,8 +185,12 @@ function verificar(d) {
   if (!git.ok) faltam.push('git');
   if (!uv.ok) faltam.push('uv');
   if (!python.ok) faltam.push('python');
+  const maquina = maquinaDe(d, achado);
   return {
     ok: true, acao: 'verificar', criados: [], jaExistiam: [], erros: [],
+    maquina,
+    instalar: comandosDeInstalacao(maquina.plataforma, maquina.gerenciador, uv.ok),
+    sitesOficiais: SITES_OFICIAIS,
     claude: { achado: Boolean(claude), listou: lista !== null },
     plugins: {
       intoca: { instalado: lista === null ? null : Boolean(intoca), versao: intoca?.version ?? null, catalogo: catalogoDe(intoca) },
@@ -411,11 +476,21 @@ function animada(entrada, d) {
 
   // 1. programas (nada é instalado por aqui: o que falta, a pessoa instala)
   const git = conferirPrograma(d, 'git', ['--version']);
-  if (!git.ok) throw new Recusa('sem-git', 'o programa "git" não está instalado (ele baixa a sala animada). Instale-o em https://git-scm.com e peça de novo; nada foi feito');
+  const comandos = () => {
+    const plataforma = d.plataforma ?? process.platform;
+    return comandosDeInstalacao(plataforma, acharGerenciador(d, plataforma), true);
+  };
+  if (!git.ok) {
+    const comando = comandos().git;
+    throw new Recusa('sem-git', `o programa "git" não está instalado (ele baixa a sala animada). Ofereça instalá-lo, com o "sim" da pessoa (${comando ?? `site oficial: ${SITES_OFICIAIS.git}`}), e peça de novo; nada foi feito`, { comando, site: SITES_OFICIAIS.git });
+  }
   const uv = conferirPrograma(d, 'uv', ['--version']);
-  if (!uv.ok) throw new Recusa('sem-uv', 'o programa "uv" não está instalado (ele prepara o Python da sala animada). Instale-o em https://docs.astral.sh/uv/getting-started/installation/ e peça de novo; nada foi feito');
+  if (!uv.ok) {
+    const comando = comandos().uv;
+    throw new Recusa('sem-uv', `o programa "uv" não está instalado (ele prepara o Python da sala animada). Ofereça instalá-lo, com o "sim" da pessoa (${comando ?? `site oficial: ${SITES_OFICIAIS.uv}`}), e peça de novo; nada foi feito`, { comando, site: SITES_OFICIAIS.uv });
+  }
   const python = conferirPython(d, true);
-  if (!python.ok) throw new Recusa('sem-python', 'não achei o Python 3.12 ou mais novo. Rode "uv python install 3.12" (ele baixa o Python) e peça de novo; nada foi feito');
+  if (!python.ok) throw new Recusa('sem-python', 'não achei o Python 3.12 ou mais novo. Ofereça instalá-lo, com o "sim" da pessoa (uv python install 3.12, que baixa o Python), e peça de novo; nada foi feito', { comando: 'uv python install 3.12', site: SITES_OFICIAIS.python });
 
   // 2. porta e destino
   const livre = d.portaLivre(porta);

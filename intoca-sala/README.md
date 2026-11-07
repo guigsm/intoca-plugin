@@ -1,8 +1,10 @@
-# InToca Sala (pacote `intoca-sala`, versão 0.4.4)
+# InToca Sala (pacote `intoca-sala`, versão 0.4.5)
 
 O **InToca Sala** é o quadro de avisos do escritório: a faixa e o painel dentro do app (este mod) e a página das Tocas no navegador (a sala Clássica). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Vem do mesmo catálogo do plugin InToca Sede (`intoca`), que o instala junto no `/intoca:comecar`, com o "sim" da pessoa.
 
 A InToca Sala completa (servidor local, página Tocas, pendências) está em [`sala/README.md`](sala/README.md). Este mod é a faixa e o painel dentro do app.
+
+O site de cada Toca (campo `site:` do manifesto) abre em `http://<rótulo>.toca.localhost/` (com a porta quando a sala não está na 80), numa origem só dele; a regra do rótulo e o porquê estão em [`sala/README.md`](sala/README.md#pasta-estática).
 
 > **Acesso antecipado: pode quebrar numa atualização do Claude Code; os hooks do `intoca` seguem valendo.**
 > Este mod usa a API de mods do Claude Code, que a própria Anthropic marca como acesso antecipado e que muda

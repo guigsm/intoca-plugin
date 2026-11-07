@@ -3,6 +3,22 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.4.5] - 2026-11-06
+
+### Alterado
+- O site de cada Toca (campo `site:`) passa a ser servido em origem própria, `http://<rótulo>.toca.localhost[:porta]/`, a partir da
+  raiz, e o cabeçalho `Content-Security-Policy: sandbox` sai. Com isso os links absolutos do site funcionam e a pré-visualização no
+  navegador interno do app carrega CSS e JS (o sandbox punha a página em origem opaca, e esse navegador recusa pedidos dela). A
+  separação da API da sala passa a vir da origem: a API só responde em `Host` de localhost e recusa `Origin` e `Sec-Fetch-Site` de
+  fora; na origem do site não existe API nem painel. O rótulo vem do nome do projeto (minúsculas, o que não é `a-z`, `0-9`, `.` ou
+  `-` vira `-`, pontas aparadas); rótulo vazio ou repetido entre duas Tocas não é servido.
+- O campo `estatico` de `/api/tocas` e `/api/sites` é agora a URL absoluta do site, com a porta do pedido.
+- Os endereços antigos `/toca/<nome>/...` em `localhost` respondem 301 para a origem nova (porta e `?query` preservadas).
+
+### Corrigido
+- Pasta pedida sem a barra final (`/pasta`) responde 301 para `/pasta/`, como Apache e GitHub Pages, em vez de servir o `index.html`
+  e quebrar os links relativos da página.
+
 ## [0.4.4] - 2026-11-05
 
 ### Alterado

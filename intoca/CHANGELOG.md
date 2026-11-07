@@ -3,6 +3,18 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.0.7] - 2026-11-06
+
+### Alterado
+- O `/intoca:comecar` passa a **conferir a máquina** sem perguntar se a pessoa tem os programas: o Node primeiro (os scripts e os hooks do plugin são
+  de Node; sem ele, falham sem aviso) e, depois, o Git. O que existe é presumido; o que falta é oferecido ("Posso instalar o X agora?") e, com o "sim" da
+  pessoa, o Claude roda o instalador do sistema e confere de novo. O mesmo vale para o `uv` e o Python da sala animada. Conta, senha, código e chave
+  continuam só da pessoa. Depois de instalar o Node ou o Git, o texto manda fechar e abrir o Claude Code e rodar o `/intoca:comecar` de novo.
+- A ação `verificar` do `instalar-sala.mjs` devolve também `maquina` (sistema, gerenciador de pacotes, versão do Node, de onde veio o `claude`) e
+  `instalar` (o comando de cada programa nesse sistema: `winget`, `brew`, `apt`, `dnf` ou `pacman`, ou `null`). O Node mínimo é o 20.
+- O fecho traz uma linha por programa: "Git: já estava", "instalado hoje" ou "recusado: o InToca funciona sem ele", e a versão do Node.
+- Saiu de todo texto do pacote a frase de que o Claude não instala programas. `git-e-github.md` ganha "Instalar o Git: o Claude faz com a sua autorização".
+
 ## [1.0.6] - 2026-11-05
 
 ### Adicionado

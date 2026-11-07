@@ -1,4 +1,4 @@
-# InToca Sede (plugin `intoca`, versão 1.0.6)
+# InToca Sede (plugin `intoca`, versão 1.0.7)
 
 O **InToca Sede** é a camada Claude da sede InToca, empacotada como plugin do Claude Code (identificador `intoca`, comandos `/intoca:...`). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Traz os cargos e as rotinas do
 regimento como skills, os assistentes de leitura como agentes e os hooks que dão contexto, bloqueiam
@@ -603,7 +603,10 @@ sem sede e talvez não conheça Git, repositório nem "sede". A skill:
    `retomar`, não recria nada: mostra o estado e oferece mudar uma resposta, registrar outro projeto
    ou ler o memorando.
 2. **Explica como tudo funciona** (resumo curto; aprofunda por seção, a pedido), em linguagem de empresa
-   (`docs/boas-vindas.md`).
+   (`docs/boas-vindas.md`). Em seguida **confere a máquina** (etapa 2b, desde a 1.0.7): o Node primeiro, pelo próprio Claude, porque
+   os scripts e os hooks do plugin são de Node e, sem ele, falham sem aviso; depois, com a ação `verificar`, o Git. O plugin **detecta e nunca
+   pergunta se a pessoa tem o programa**: o que existe é presumido; o que falta é oferecido ("Posso instalar o X agora?") e, com o "sim", o Claude
+   roda o instalador do sistema (`winget`, `brew` ou o gerenciador da distribuição) e confere de novo. Conta, senha, código e chave seguem só da pessoa.
 3. **Faz sete perguntas, uma de cada vez**, com sugestão: nome da sede; perfil (`nunca usei Git`,
    `uso às vezes`, `desenvolvedor`); modo (`agregadora`: os projetos moram dentro da sede; `registro`: a
    sede só aponta onde eles estão); onde fica a sede; padrão do nome dos chats; rigor das permissões
@@ -637,15 +640,16 @@ sem sede e talvez não conheça Git, repositório nem "sede". A skill:
 **A InToca Sala no começo (0.10.0).** O `/intoca:comecar` não termina na sede: oferece a **InToca Sala**, o quadro de avisos do
 escritório (a página das Tocas, das ordens em andamento, dos recursos ocupados e das pendências do proprietário, mais a faixa dentro do
 app). É o pacote-irmão `intoca-sala`, do mesmo catálogo do `intoca`, e a skill o instala **num passo só** pelo script
-`scripts/instalar-sala.mjs` (Node, sem dependência): ação `verificar` (só lê: acha o `claude`, vê o que já está instalado e confere `git`, `uv` e
-Python 3.12 ou mais novo), ação `sala` (simula e, só com `"simular": false` e `"confirmado": true`, roda `claude plugin install`; se o `intoca` também
+`scripts/instalar-sala.mjs` (Node, sem dependência): ação `verificar` (só lê: acha o `claude` por `CLAUDE_CODE_EXECPATH` ou pelo PATH, vê o que já está instalado
+e confere `git`, `uv` e Python 3.12 ou mais novo; devolve `maquina` com o sistema, o gerenciador de pacotes, o Node e o `claude`, e `instalar` com o
+comando pronto de cada programa naquele sistema, ou `null`: o script nunca instala, quem roda o comando é o Claude, depois do "sim"), ação `sala` (simula e, só com `"simular": false` e `"confirmado": true`, roda `claude plugin install`; se o `intoca` também
 faltasse, os dois vão juntos; `"recusou": true` registra a recusa sem tocar em nada) e ação `animada` (abaixo). A sala **sobe sozinha nos chats
 novos** (o lançador do `intoca-sala` 0.3.0) e se desliga com `INTOCA_SALA_SEM_LANCADOR=1` ou `"lancador": false` em `.intoca/sala.json`; a skill
 diz as duas coisas antes de instalar. Vale a partir dos chats novos.
 
 A **sala animada** (AI Operations Room · InToca, Python, repositório público derivado de `mewsdev/AiOperationsRoom`, MIT, com crédito) é um **passo
-opcional e explícito**, nunca efeito de instalar o plugin: ação `animada` do mesmo script. Confere `git`, `uv` e Python 3.12 (**não instala nenhum**: o que
-falta vira orientação), confere a porta (padrão 8765; ocupada, recusa e sugere a próxima) e a pasta (a do item `ferramentas` do manifesto, ou a que a
+opcional e explícito**, nunca efeito de instalar o plugin: ação `animada` do mesmo script. Confere `git`, `uv` e Python 3.12 (o que
+falta, o Claude oferece instalar e instala com o "sim" da pessoa, pelo comando de `instalar`), confere a porta (padrão 8765; ocupada, recusa e sugere a próxima) e a pasta (a do item `ferramentas` do manifesto, ou a que a
 pessoa informar; destino com outro conteúdo é recusado), clona o repositório e roda `uv sync`. Só simula até receber `"simular": false`. Os **hooks**
 (`hooks-install` da sala, que altera `<pasta pessoal>/.claude/settings.json`) só entram com `"hooks": true` **e** `"confirmado": true`: antes, o script guarda uma
 cópia do arquivo ao lado (`settings.json.intoca-copia-<data>`, nunca apagada) e, se o registro falhar, devolve o arquivo byte a byte. Falha no clone ou no

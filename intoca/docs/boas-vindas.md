@@ -72,8 +72,8 @@ Dúvida que muda o rumo não é decidida por ninguém além de você: vira pergu
 Veja `git-e-github.md`. Em resumo: o GitHub é um cofre online opcional para o histórico dos arquivos. Vão as
 regras, a fila, as ordens e os relatórios; não vão segredos, nem dependências baixadas, nem arquivos pesados. O
 envio ao GitHub ainda não está ligado nesta versão do plugin: ele chega junto com uma conferência automática de
-segredos antes do primeiro envio. O Git é opcional: o InToca funciona sem ele, com algumas limitações; a comparação e o passo a passo
-para instalá-lo estão em `git-e-github.md`.
+segredos antes do primeiro envio. O Git é opcional: o InToca funciona sem ele, com algumas limitações; a comparação e o jeito de instalá-lo
+(o Claude o instala com a sua autorização) estão em `git-e-github.md`.
 
 ## 7. Como pedir ajuda
 
@@ -95,8 +95,8 @@ conversa, dentro do app, um aviso curto com a ordem do chat e as pendências. El
   atrasar o chat. Para desligar isso: `INTOCA_SALA_SEM_LANCADOR=1` no ambiente, ou `"lancador": false` no arquivo `.intoca/sala.json` da
   sua pasta pessoal. Para tirá-la de vez, desinstale o pacote `intoca-sala`.
 - **A versão animada é opcional.** A *AI Operations Room · InToca* ("Animada") é outra sala, em pixel art, com um escritório por projeto e
-  os chats ao vivo. O `/intoca:comecar` só a oferece depois da InToca Sala, confere antes se você tem `git`, `uv` e Python 3.12 (não
-  instala nada disso por você), baixa o programa de um repositório público, pergunta a porta (a sugerida é 8765) e **só registra os hooks, a
+  os chats ao vivo. O `/intoca:comecar` só a oferece depois da InToca Sala, confere antes se a máquina tem `git`, `uv` e Python 3.12 (o que
+  faltar, o Claude instala com o seu "sim"; conta e senha são só suas), baixa o programa de um repositório público, pergunta a porta (a sugerida é 8765) e **só registra os hooks, a
   ponte entre os chats e a sala, com o seu "sim" à parte**: isso altera o arquivo de configurações do Claude, e uma cópia dele é guardada
   antes. As duas salas se alternam com um clique.
 - **A Suíte é opcional.** Se você produz ferramentas que servem a vários projetos, pode agrupá-las em frentes no bloco `suite:` do `sede.yaml` (o modelo traz um exemplo comentado); a InToca Sala então mostra um grupo por frente.

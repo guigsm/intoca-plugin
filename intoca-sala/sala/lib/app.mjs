@@ -1,15 +1,20 @@
 // A InToca Sala (a "Clássica"): rotas e regras. `criarApp` recebe tudo que toca o mundo (ambiente, pasta do
 // usuário, processos, sondagem de portas), então os testes montam uma sala inteira com pastas temporárias.
 //
-// Segurança: só atende `Host` de localhost (barra DNS rebinding); ações pedem o cabeçalho `X-Painel: 1` (outro
+// Segurança: a API só atende `Host` de localhost (barra DNS rebinding); ações pedem o cabeçalho `X-Painel: 1` (outro
 // site aberto no navegador não o envia sem preflight CORS, que não é respondido); e iniciar/parar só valem com
 // `controle: true` em `~/.intoca/sala.json`, que nasce desligado. Parar um processo que a sala não iniciou
 // ("externo") exige `confirm: true` no corpo, validado aqui, não no navegador.
+//
+// Sites estáticos das Tocas: cada um é servido na origem própria `<rótulo>.toca.localhost[:porta]`, tratada ANTES do
+// teste de `Host` e sem nenhuma rota da sala (nem `/api`, nem o painel). Como é outra origem que `localhost`, o script
+// do site não lê as respostas da API (sem CORS) e não passa em `origemPropria` (`Origin` e `Sec-Fetch-Site: same-site`
+// são recusados). Isso substitui o `Content-Security-Policy: sandbox` que o site levava antes.
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverSites, fold, gitBranch, linkVsCode, parseManifesto, readText, suiteInfo } from './descoberta.mjs';
-import { resolver, responder } from './estatico.mjs';
+import { CABECALHOS_SEGUROS, hostDoSite, mapaDeSites, portaDoHost, resolver, responder, rotuloServido, urlDoSite } from './estatico.mjs';
 import { acharSede, casaDe, configDaAnimada, controleLigado, gravarConfigDaAnimada, gravarOrdem, lerEstado, ordemSalva } from './estado.mjs';
 import { discoverTools } from './ferramentas.mjs';
 import { agrupar, idsMoveis, ordenar } from './agrupar.mjs';
@@ -21,7 +26,7 @@ import { criarProcessos, isListening } from './processos.mjs';
 const AQUI = dirname(fileURLToPath(import.meta.url));
 // A versão vem do `.claude-plugin/plugin.json` do pacote, lido uma vez ao subir; o literal é só a reserva para o arquivo
 // que não puder ser lido (pasta copiada sem o manifesto, por exemplo). Mantê-lo igual ao `plugin.json` evita surpresa.
-const VERSAO_DE_RESERVA = '0.4.4';
+const VERSAO_DE_RESERVA = '0.4.5';
 export function lerVersao(arquivo = join(AQUI, '..', '..', '.claude-plugin', 'plugin.json')) {
   try {
     const v = JSON.parse(readFileSync(arquivo, 'utf8').replace(/^﻿/, '')).version;
@@ -135,7 +140,9 @@ export function criarApp({
     };
   }
 
-  async function status(itens) {
+  // `porta` é a do `Host` do pedido que chegou à API (`''` = a 80): o site mora na mesma porta da sala.
+  async function status(itens, porta = '') {
+    const sites = mapaDeSites(itens);
     return Promise.all(
       itens.map(async (site) => {
         const rodando = site.port ? await escutando(site.port) : false;
@@ -152,7 +159,7 @@ export function criarApp({
           fabrica: site.fabrica,
           description: site.description,
           url: site.url,
-          estatico: site.siteDir ? `/toca/${encodeURIComponent(site.name)}/` : undefined,
+          estatico: rotuloServido(sites, site) ? urlDoSite(rotuloServido(sites, site), porta) : undefined,
           producao: site.urlProducao,
           vscode: site.dir ? linkVsCode(site.dir) : undefined,
           port: site.port,
@@ -218,10 +225,24 @@ export function criarApp({
   }
 
   async function handle(req, res) {
-    if (!hostPermitido(req)) return enviar(res, 403, { error: 'host não permitido' });
     const url = new URL(req.url, 'http://localhost');
 
-    // Pasta estática de uma Toca (campo site: do manifesto). Só leitura; a segurança está em estatico.mjs.
+    // Site estático de uma Toca (campo site: do manifesto), na origem própria `<rótulo>.toca.localhost`. Vem antes de
+    // `hostPermitido` e nunca chega às rotas da sala: ali `/` e `/api/...` são arquivos do site (ou 404). Só leitura;
+    // a defesa de caminho está em estatico.mjs.
+    const hs = hostDoSite(req.headers.host);
+    if (hs) {
+      const mapa = mapaDeSites(sede().itens);
+      const texto = (status, corpo) => responder(res, { status, headers: { ...CABECALHOS_SEGUROS, 'Content-Type': 'text/plain; charset=utf-8' }, corpo });
+      if (mapa.ambiguos.has(hs.rotulo)) return texto(404, 'Mais de uma Toca tem o mesmo rótulo; nenhuma é servida. Renomeie uma delas no manifesto.');
+      const item = mapa.servidos.get(hs.rotulo);
+      if (!item) return texto(404, 'Nenhuma Toca com pasta estática (campo site: do manifesto) tem este endereço.');
+      return responder(res, resolver({ raiz: item.siteDir, pedido: url.pathname, consulta: url.search, metodo: req.method }));
+    }
+
+    if (!hostPermitido(req)) return enviar(res, 403, { error: 'host não permitido' });
+
+    // Endereço antigo (`/toca/<id>/...`): redireciona para a origem própria do site, com a porta do pedido e a query.
     const est = url.pathname.match(/^\/toca\/([^/]+)(\/.*)?$/);
     if (est) {
       let nome;
@@ -230,14 +251,14 @@ export function criarApp({
       } catch {
         return enviar(res, 400, { error: 'caminho não permitido' });
       }
-      const item = sede().itens.find((i) => i.name === nome && i.siteDir);
-      if (!item) return enviar(res, 404, { error: 'Toca sem pasta estática (campo site: do manifesto)' });
-      if (est[2] === undefined) {
-        res.writeHead(301, { Location: `/toca/${est[1]}/`, 'Cache-Control': 'no-store' });
-        return res.end();
-      }
-      return responder(res, resolver({ raiz: item.siteDir, pedido: est[2], metodo: req.method }));
+      const itens = sede().itens;
+      const item = itens.find((i) => i.name === nome && i.siteDir);
+      const rotulo = item ? rotuloServido(mapaDeSites(itens), item) : undefined;
+      if (!rotulo) return enviar(res, 404, { error: 'Toca sem pasta estática servível (campo site: do manifesto, nome com rótulo único)' });
+      res.writeHead(301, { Location: urlDoSite(rotulo, portaDoHost(req.headers.host), est[2] ?? '/') + url.search, 'Cache-Control': 'no-store' });
+      return res.end();
     }
+    const porta = portaDoHost(req.headers.host);
 
     if (req.method === 'GET') {
       if (url.pathname === '/') return enviar(res, 200, readFileSync(paginaInicial, 'utf8'), 'text/html; charset=utf-8');
@@ -247,11 +268,11 @@ export function criarApp({
         if (!s.achada) return enviar(res, 200, { sede: false, fontes: [], ausentes: [], total: 0 });
         return enviar(res, 200, { sede: true, ...pendenciasDaSede({ raiz: s.achada.raiz, projects: s.projects }) });
       }
-      if (url.pathname === '/api/sites') return enviar(res, 200, await status(sede().itens));
+      if (url.pathname === '/api/sites') return enviar(res, 200, await status(sede().itens, porta));
       if (url.pathname === '/api/suite') return enviar(res, 200, sede().suiteInfo);
       if (url.pathname === '/api/tocas') {
         const s = sede();
-        const lista = await status(s.itens);
+        const lista = await status(s.itens, porta);
         // O grupo fixo vem primeiro; os demais seguem a ordem que a pessoa gravou (grupo novo no fim, id que sumiu ignorado).
         const grupos = ordenar(agrupar(lista, s.suiteInfo, { eu: s.eu }), ordemSalva(casa));
         return enviar(res, 200, {
