@@ -3,6 +3,16 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.4.6] - 2026-11-09
+
+### Alterado
+- Visitar a outra sala por link não muda mais o padrão do navegador: `/?sala=classica` e o clique no botão Animada deixam de gravar
+  a preferência `intoca-sala`. A preferência já guardada continua valendo, sem migração.
+
+### Adicionado
+- Na Clássica, a caixa **"Abrir a Animada ao digitar localhost"** é o único controle do padrão (ticada grava `animada`, desticada
+  grava `classica`). Aparece com a Animada registrada, no ar ou não.
+
 ## [0.4.5] - 2026-11-06
 
 ### Alterado

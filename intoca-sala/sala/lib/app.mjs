@@ -26,7 +26,7 @@ import { criarProcessos, isListening } from './processos.mjs';
 const AQUI = dirname(fileURLToPath(import.meta.url));
 // A versão vem do `.claude-plugin/plugin.json` do pacote, lido uma vez ao subir; o literal é só a reserva para o arquivo
 // que não puder ser lido (pasta copiada sem o manifesto, por exemplo). Mantê-lo igual ao `plugin.json` evita surpresa.
-const VERSAO_DE_RESERVA = '0.4.5';
+const VERSAO_DE_RESERVA = '0.4.6';
 export function lerVersao(arquivo = join(AQUI, '..', '..', '.claude-plugin', 'plugin.json')) {
   try {
     const v = JSON.parse(readFileSync(arquivo, 'utf8').replace(/^﻿/, '')).version;

@@ -299,8 +299,10 @@ const NO_WINDOWS = process.platform === 'win32';
 // Valores: simples (com `# comentário` no fim), entre aspas simples (`''` vira `'`), entre aspas
 // duplas (só `\\` e `\"` como escape) e lista em linha (`['a', b]`). Bloco dobrado (`>-`, `|`) e mapa
 // aninhado são ignorados. Linha mais recuada que as chaves do item (texto dobrado, sublista) é pulada.
+// `tipo`, `status`, `repositorio` e `gerente` (PLG-31) só servem às dicas do consultor (hooks/consultor.mjs).
 const CAMPOS_DO_MANIFESTO = new Set([
   'nome', 'sigla', 'siglas_antigas', 'pasta_atual', 'pasta_futura', 'pastas_antigas', 'branch_principal', 'deploy', 'exibicao',
+  'tipo', 'status', 'repositorio', 'gerente',
 ]);
 
 // Separa por vírgula no nível de cima, respeitando aspas e colchetes. null se as aspas não fecham.
@@ -492,10 +494,14 @@ const ILEGIVEL = '(ilegível)'; // o campo existe, mas o leitor não entende o v
 // Na dúvida vale o mais restritivo (ILEGIVEL, que vira cauteloso): valor vazio, o campo repetido com valores
 // diferentes, ou uma linha `rigor:` em qualquer outro lugar do arquivo (no topo, mais recuada, debaixo de uma
 // `sede` entre aspas), porque quem a escreveu quis um nível e o leitor não saberia qual.
+// O mesmo leitor serve a outros campos da `sede:` com a mesma cautela (PLG-31: `consultor` e `perfil`): `campo` é o nome.
 function rigorDoManifesto(linhas) {
+  return campoDaSede(linhas, 'rigor');
+}
+function campoDaSede(linhas, campo) {
   const inicio = linhas.findIndex((l) => /^sede:/.test(l));
   const pares = [];
-  const lidas = new Set(); // linhas `rigor:` lidas como campo da sede
+  const lidas = new Set(); // linhas `<campo>:` lidas como campo da sede
   if (inicio >= 0) {
     const resto = linhas[inicio].slice('sede:'.length).trim();
     if (resto.startsWith('{')) {
@@ -503,7 +509,7 @@ function rigorDoManifesto(linhas) {
       const partes = fim < 0 ? null : partesDeFluxo(resto.slice(1, fim));
       // Mapa que não fecha na mesma linha (aberto em várias linhas, ou quebrado): nada vira campo. Um `rigor`
       // nesta linha é dúvida; um nas linhas seguintes cai na checagem "fora" abaixo. Os dois valem cauteloso.
-      if (!partes && /\brigor['"]?\s*:/.test(resto)) return ILEGIVEL;
+      if (!partes && new RegExp(`\\b${campo}['"]?\\s*:`).test(resto)) return ILEGIVEL;
       for (const p of partes ?? []) {
         const kv = chaveDoManifesto(p);
         if (kv) pares.push(kv);
@@ -520,13 +526,14 @@ function rigorDoManifesto(linhas) {
         const kv = chaveDoManifesto(linha.slice(recuo));
         if (kv) {
           pares.push(kv);
-          if (kv[0] === 'rigor') lidas.add(i);
+          if (kv[0] === campo) lidas.add(i);
         }
       }
     }
   }
-  const fora = linhas.some((l, i) => !lidas.has(i) && /^\s*['"]?rigor['"]?\s*:/.test(l));
-  const achados = pares.filter(([chave]) => chave === 'rigor').map(([, v]) => v);
+  const foraDaSede = new RegExp(`^\\s*['"]?${campo}['"]?\\s*:`);
+  const fora = linhas.some((l, i) => !lidas.has(i) && foraDaSede.test(l));
+  const achados = pares.filter(([chave]) => chave === campo).map(([, v]) => v);
   if (fora) return ILEGIVEL;
   if (achados.length === 0) return undefined;
   const valores = achados.map((v) => (v.ok && v.valor !== undefined && v.valor !== null ? v.valor : ILEGIVEL));
@@ -572,14 +579,19 @@ function pastaDoRepositorio(linha) {
   return kv && kv[0] === 'pasta' && kv[1].ok && typeof kv[1].valor === 'string' ? kv[1].valor : null;
 }
 
-// Texto do sede.yaml → { projetos: [{ nome, sigla, pasta_atual, ... }], titulos, rigor }, ou null se ilegível
-// (sem a chave `projetos:` no topo, ou item em linha que não fecha). `rigor` é o valor cru (ver nivelDeRigor).
+// Texto do sede.yaml → { projetos: [{ nome, sigla, pasta_atual, ... }], titulos, rigor, consultor, perfil }, ou null se
+// ilegível (sem a chave `projetos:` no topo, ou item em linha que não fecha). `rigor`, `consultor` e `perfil` são os valores
+// crus da `sede:` (ver nivelDeRigor e, no consultor.mjs, modoDoConsultor e perfilDaPessoa): undefined quando o campo não
+// existe, '(ilegível)' quando existe e o leitor não sabe qual valor vale.
+function camposDaSede(linhas) {
+  return { titulos: titulosDoManifesto(linhas), rigor: rigorDoManifesto(linhas), consultor: campoDaSede(linhas, 'consultor'), perfil: campoDaSede(linhas, 'perfil') };
+}
 export function interpretarManifesto(texto) {
   if (typeof texto !== 'string') return null;
   const linhas = texto.replace(/^﻿/, '').split(/\r?\n/);
   const inicio = linhas.findIndex((l) => /^projetos:\s*(#.*)?$/.test(l) || /^projetos:\s*\[\s*\]\s*(#.*)?$/.test(l));
   if (inicio < 0) return null;
-  if (/\[\s*\]/.test(linhas[inicio])) return { projetos: [], titulos: titulosDoManifesto(linhas), rigor: rigorDoManifesto(linhas) };
+  if (/\[\s*\]/.test(linhas[inicio])) return { projetos: [], ...camposDaSede(linhas) };
   const projetos = [];
   let atual = null;
   let colunaDasChaves = -1;
@@ -629,7 +641,7 @@ export function interpretarManifesto(texto) {
     const kv = chaveDoManifesto(linha.slice(recuo));
     if (kv) { chaveAtual = kv[0]; guardarCampo(atual, kv[0], kv[1]); }
   }
-  return { projetos, titulos: titulosDoManifesto(linhas), rigor: rigorDoManifesto(linhas) };
+  return { projetos, ...camposDaSede(linhas) };
 }
 
 export function lerManifesto(sede) {
@@ -943,6 +955,12 @@ export function cargoDoTitulo(titulo, titulos) {
   return null;
 }
 
+// Chat `Consultor` (PLG-31): chat comum que roda a skill consultor, aberto pela Diretoria. Não é cargo: fica fora da cadeia,
+// e os avisos de chat trocado e de pasta errada não valem para ele. Aceita `Consultor` e `Consultor · <qualquer coisa>`.
+export function ehChatDoConsultor(titulo) {
+  return typeof titulo === 'string' && /^Consultor(?: · .*)?$/i.test(titulo.replace(/\s+/g, ' ').trim().slice(0, 200));
+}
+
 // Mensagem entre chats, notificação do sistema e texto colado não são "pedido do proprietário". O texto de um
 // prompt sem esses blocos é o que as pessoas digitaram ali (ou, num chat de cargo, o que a ferramenta entregou
 // como pedido). Bloco sem fechamento vale até o fim do prompt. Também sai o que está em bloco de código cercado
@@ -950,18 +968,57 @@ export function cargoDoTitulo(titulo, titulos) {
 const ENVELOPES = ['cross-session-message', 'system-reminder', 'task-notification', 'side-sessions-event', 'ci-monitor-event',
   'pasted_content', 'local-command-stdout', 'local-command-caveat', 'command-message', 'user-prompt-submit-hook'];
 export function textoDoProprietario(prompt, { citacoes = true } = {}) {
-  let t = String(prompt ?? '');
-  const nomes = ENVELOPES.map((n) => n.replace(/[-_]/g, '[-_]')).join('|');
-  const fechado = new RegExp(`<(${nomes})\\b[^>]*>[\\s\\S]*?</\\1\\s*>`, 'gi');
-  const aberto = new RegExp(`<(?:${nomes})\\b[^>]*>[\\s\\S]*$`, 'i');
-  for (let i = 0; i < 4; i += 1) {
-    const novo = t.replace(fechado, ' ');
-    if (novo === t) break;
-    t = novo;
-  }
-  t = t.replace(aberto, ' ');
+  let t = tirarEnvelopes(String(prompt ?? ''), ENVELOPES);
   if (citacoes) t = t.replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/^[ \t]*>.*$/gm, ' ');
   return t.trim();
+}
+
+// Tira os envelopes `<nome ...>...</nome>` do texto. Cada um vai até o primeiro fecho com o mesmo nome escrito na abertura
+// (`</nome>`, com espaço antes do `>` aceito); envelope sem fecho vai até o fim do texto. `-` e `_` valem igual no nome da
+// abertura. Uma passada, linear no tamanho do texto (PLG-31: a versão com expressão regular preguiçosa levava segundos com
+// milhares de envelopes sem fecho num prompt de 200 mil caracteres).
+const ABERTURAS = new Map();
+export function tirarEnvelopes(texto, nomes) {
+  const chave = nomes.join('|');
+  let abre = ABERTURAS.get(chave);
+  if (!abre) {
+    abre = new RegExp(`<(${nomes.map((n) => n.replace(/[-_]/g, '[-_]')).join('|')})\\b[^<>]{0,500}>`, 'gi');
+    ABERTURAS.set(chave, abre);
+  }
+  const baixa = texto.toLowerCase();
+  let saida = '';
+  let pos = 0;
+  abre.lastIndex = 0;
+  for (let m = abre.exec(texto); m; m = abre.exec(texto)) {
+    saida += `${texto.slice(pos, m.index)} `;
+    const alvo = `</${m[1].toLowerCase()}`;
+    let busca = m.index + m[0].length;
+    let fim = -1;
+    for (;;) {
+      const k = baixa.indexOf(alvo, busca);
+      if (k < 0) break;
+      let j = k + alvo.length;
+      while (j < texto.length && /\s/.test(texto[j])) j += 1;
+      if (texto[j] === '>') { fim = j; break; }
+      busca = k + 1;
+    }
+    if (fim < 0) return saida; // sem fecho: o resto do texto é do envelope
+    pos = fim + 1;
+    abre.lastIndex = pos;
+  }
+  return saida + texto.slice(pos);
+}
+
+// O texto cita um arquivo `os/<nome>.md` (a ordem de executar uma OS)? Palavra por palavra (separadas por espaço ou aspas),
+// sem expressão que recomece no meio de uma palavra longa: linear mesmo com `os/os/os/...` de 200 mil caracteres.
+export function citaArquivoDeOs(texto) {
+  for (const palavra of String(texto ?? '').split(/[\s"'`]+/)) {
+    if (palavra.length < 6) continue;
+    const baixa = palavra.toLowerCase();
+    const k = baixa.search(/(?:^|[@(\\/])os[\\/]/);
+    if (k >= 0 && baixa.indexOf('.md', k + 3) > 0) return true;
+  }
+  return false;
 }
 
 // Projetos do manifesto (já montados em ctx.projetos) que respondem à sigla do ID de uma OS (`PLG-25` → PLG),
@@ -1007,6 +1064,7 @@ export function montarContexto(entrada) {
       projetos.push({
         nome: String(p.nome ?? (pastas[0] ? basename(pastas[0].lex) : '')), atual, pastas, antigas,
         branch: p.branch_principal, sigla: p.sigla, siglas, repositorios: Array.isArray(p.repositorios) ? p.repositorios.filter(absoluto) : [],
+        item: p, // o item cru do manifesto (tipo, status, repositorio, gerente: as dicas do consultor leem daqui)
       });
     }
   }

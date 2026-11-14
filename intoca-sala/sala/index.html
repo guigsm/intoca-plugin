@@ -130,6 +130,7 @@
   .fixa-marca { font-size: 12px; font-weight: 400; color: var(--muted); }
   /* a sala animada */
   .auto { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+  .auto[hidden] { display: none; }
   .auto label { color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
   .instr { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
   .instr p { margin: 6px 0; }
@@ -154,6 +155,10 @@
     </span>
   </header>
   <div id="avisos"></div>
+  <div class="auto" id="padrao-animada" hidden>
+    <label for="padrao-animada-caixa"><input type="checkbox" id="padrao-animada-caixa">Abrir a Animada ao digitar localhost</label>
+    <span>Vale só neste navegador. Os botões entre as duas salas são visitas e não mudam isso.</span>
+  </div>
   <details class="pend" id="pend" hidden>
     <summary id="pend-resumo"></summary>
     <div id="pend-lista"></div>
@@ -186,14 +191,13 @@
   const LABEL = { running: 'rodando', starting: 'iniciando…', stopped: 'parado' };
   const STALL_MS = 60000;
 
-  // Preferência de sala do navegador (nunca do manifesto). A Animada tem outra origem, então o botão dela
-  // (e o "Clássica" dela, que abre /?sala=classica) é que grava a escolha deste lado.
+  // Preferência de sala do navegador (nunca do manifesto). Visitar a outra sala por link (o botão Animada daqui, o Clássica
+  // da Animada, que abre /?sala=classica) NÃO grava nada: só a caixa "Abrir a Animada ao digitar localhost" muda o padrão.
   const pref = {
     get() { try { return localStorage.getItem('intoca-sala'); } catch { return null; } },
-    set(v) { try { localStorage.setItem('intoca-sala', v); } catch {} },
+    set(v) { try { localStorage.setItem('intoca-sala', v); return true; } catch { return false; } },
   };
   const forcaClassica = new URLSearchParams(location.search).get('sala') === 'classica';
-  if (forcaClassica) pref.set('classica');
 
   function el(tag, attrs = {}, ...children) {
     const node = document.createElement(tag);
@@ -652,9 +656,23 @@
     const falta = saude.faltaNoManifesto ?? [];
     if (falta.length) lista.push(el('div', { class: 'aviso' }, 'Falta no manifesto (peça à Diretoria): ' + falta.map((f) => `${f.ferramenta} (${f.campos.join(', ')})`).join('; ')));
     avisosBox.replaceChildren(...lista);
+    padraoBox.hidden = !saude.animada.registrada;
     irAnimada.hidden = !(saude.animada.registrada && saude.animada.no_ar);
     if (!irAnimada.hidden) irAnimada.href = `${location.protocol}//${location.hostname}:${saude.animada.porta}/`;
   }
+
+  // A caixa do padrão: aparece com a Animada registrada (no ar ou não, para dar para desticar quando ela cair).
+  // Nasce ticada quando a preferência guardada é 'animada'. Mudar não recarrega nem redireciona a página.
+  const padraoBox = document.getElementById('padrao-animada');
+  const padraoCaixa = document.getElementById('padrao-animada-caixa');
+  padraoCaixa.checked = pref.get() === 'animada';
+  // Depois de mexer na caixa, a página não salta mais sozinha: o salto é só da carga (mudar não redireciona na hora).
+  let padraoMexido = false;
+  padraoCaixa.addEventListener('change', () => {
+    padraoMexido = true;
+    // Se não gravou (localStorage indisponível), a caixa volta ao estado anterior em vez de fingir que gravou.
+    if (!pref.set(padraoCaixa.checked ? 'animada' : 'classica')) padraoCaixa.checked = !padraoCaixa.checked;
+  });
 
   function pendencias(p) {
     pend.hidden = !p.sede;
@@ -678,7 +696,7 @@
         fetch('/api/pendencias').then((r) => r.json()).catch(() => ({ sede: false })),
       ]);
       // A raiz é a Clássica; só vai para a Animada quando o navegador prefere e ela responde.
-      if (!jaRedirecionou && !forcaClassica && pref.get() === 'animada' && saude.animada.no_ar) {
+      if (!jaRedirecionou && !padraoMexido && !forcaClassica && pref.get() === 'animada' && saude.animada.no_ar) {
         jaRedirecionou = true;
         location.replace(`${location.protocol}//${location.hostname}:${saude.animada.porta}/`);
         return;
@@ -694,7 +712,6 @@
     }
   }
 
-  irAnimada.addEventListener('click', () => pref.set('animada'));
   refresh();
   setInterval(refresh, 3000);
 </script>

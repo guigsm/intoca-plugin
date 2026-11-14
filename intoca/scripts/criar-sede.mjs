@@ -65,7 +65,7 @@ const LIMITE_DA_ENTRADA = 65536;
 // Primeiro nível da sede onde um projeto não mora (governança, infraestrutura, isolamento).
 const PASTAS_DA_SEDE = new Set(['diretoria', '.claude', '.git', 'labs']);
 const RESERVADOS_DO_WINDOWS = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
-const ID_DA_MENSAGEM = 'DIR-17';
+const ID_DA_MENSAGEM = 'DIR-01'; // a numeração de OS de uma sede nova começa em 01 (sede que já existe não é tocada)
 
 class Recusa extends Error {
   constructor(codigo, mensagem) { super(mensagem); this.codigo = codigo; }

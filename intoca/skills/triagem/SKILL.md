@@ -15,6 +15,10 @@ Resposta curta, dada antes de agir, que o proprietário aprova com "vai".
 ## Os 7 itens
 
 1. **Entendimento** do pedido em uma linha, com as dúvidas que mudariam o rumo.
+1b. **Relevância**, só em **recurso novo** (N3 ou mais, ou pedido que cria cargo, comando, hook ou skill novos), numa linha:
+   `Relevância: valor <alto|médio|baixo> · custo <complexidade, vocabulário novo, manutenção> · sobreposição <nada|com X> · recomendo <fazer|adiar|descartar>`,
+   mais uma frase de porquê. Sobreposição é com o que o plugin e a sede já têm (skill, hook, assistente, rotina). É a mesma
+   avaliação do `/intoca:consultor avaliar`.
 2. **Nível** (N1 a N5) e **risco** (baixo, médio, alto: produção, dados, irreversível).
 3. **Destino:** o próprio gerente, subagente, chat existente ou chat novo.
 4. **Recurso e ocupação:** livre agora, ou na fila atrás de quem. Conferir `fila.md`.
@@ -47,6 +51,7 @@ N3 ou mais, os 7 itens numerados, cada um em uma ou duas frases, e a pergunta fi
 ```
 Triagem de <pedido>
 1. Entendimento: ...
+1b. Relevância: valor alto · custo baixo · sobreposição nada · recomendo fazer (só em recurso novo)
 2. Nível e risco: N3, médio
 3. Destino: chat novo
 4. Recurso: <nome>, livre

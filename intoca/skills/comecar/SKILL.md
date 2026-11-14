@@ -1,6 +1,6 @@
 ---
 name: comecar
-description: 'Acione quando a pessoa pedir para começar ("/intoca:comecar", "criar minha sede", "como isso funciona?", "instalei o plugin, e agora?"), ou quando não houver sede nenhuma: explica como tudo funciona, faz sete perguntas (mais duas a quem já tem pastas de projeto), cria a sede, registra o primeiro projeto, deixando a pasta onde está ou trazendo-a para dentro da sede, aplica o rigor das permissões, confere a máquina (Node e Git) e instala o que faltar com o "sim" da pessoa, oferece a InToca Sala (a sala de operações), com a versão animada como passo opcional, e pergunta se o Claude Code deve atualizar o InToca sozinho.'
+description: 'Acione quando a pessoa pedir para começar ("/intoca:comecar", "criar minha sede", "como isso funciona?", "instalei o plugin, e agora?"), ou quando não houver sede nenhuma: explica como tudo funciona, faz oito perguntas (mais duas a quem já tem pastas de projeto), cria a sede, registra o primeiro projeto, deixando a pasta onde está ou trazendo-a para dentro da sede, aplica o rigor das permissões, escolhe o modo do consultor, confere a máquina (Node e Git) e instala o que faltar com o "sim" da pessoa, oferece a InToca Sala (a sala de operações), com a versão animada como passo opcional, e pergunta se o Claude Code deve atualizar o InToca sozinho.'
 argument-hint: "[retomar]"
 ---
 
@@ -25,13 +25,15 @@ Rode a ação `estado` (`{"acao":"estado"}`). Se `achada` for verdadeiro, ou se 
 **não recrie nada**: mostre em poucas linhas o nome, o modo, o perfil e os projetos da sede, e ofereça (a) mudar
 uma resposta, (b) registrar outro projeto, (c) ler o memorando (`/intoca:memorando`). Não pergunte de novo o
 que já está no manifesto. Ofereça também (d) ver ou trocar o rigor das permissões (`/intoca:rigor`), (e) instalar a InToca
-Sala, se ainda não estiver (etapas 5b e 5c) e (f) ligar a atualização automática do InToca (fim da etapa 5b). Se o estado trouxer `avisoDeVersao`, repita-o em uma frase (o plugin instalado é
+Sala, se ainda não estiver (etapas 5b e 5c) e (f) ligar a atualização automática do InToca (fim da etapa 5b). Se a `sede:` do
+`sede.yaml` não tem a linha `consultor:`, faça **uma vez** a pergunta 7 (o consultor) e grave a resposta como na etapa 5, inclusive
+`sob_demanda`: com a linha gravada, a pergunta não volta. Se o estado trouxer `avisoDeVersao`, repita-o em uma frase (o plugin instalado é
 mais velho que o `plugin_minimo` da sede: é só um aviso, nada se bloqueia). Sede sem `plugin_minimo` (feita antes da 0.10.0):
 diga que ela não tem o campo e ofereça acrescentar, com o "sim" da pessoa, a linha
 `plugin_minimo: '0.10.0'   # versao minima do plugin intoca com que esta sede funciona; so aviso` logo abaixo de `versao:`.
 - Mudar uma resposta: com o "sim" da pessoa, edite só a linha correspondente do `sede.yaml`.
 - Outro projeto: pergunte primeiro se é **uma pasta nova ou uma pasta que a pessoa já tem**. Pasta nova: faça as
-  perguntas da etapa 3 (a pergunta 7), rode a ação `projeto` (cria só a pasta do projeto e a mensagem do gerente),
+  perguntas da etapa 3 (a pergunta 8), rode a ação `projeto` (cria só a pasta do projeto e a mensagem do gerente),
   mostre `manifesto.itemDoProjeto` e, com o "sim", acrescente-o à lista `projetos:` do `sede.yaml` (sem apagar
   nada) e uma linha à tabela do `WORKSPACE.md`. Pasta que já existe: siga a etapa 3b (as perguntas A e B e a ação
   `adotar`), que oferece **deixar onde está** ou **trazer para a sede**. Depois ofereça aplicar o rigor na pasta
@@ -39,7 +41,7 @@ diga que ela não tem o campo e ofereça acrescentar, com o "sim" da pessoa, a l
 
 ## 2. Boas-vindas
 
-Sem sede: abra com o **Resumo** de `boas-vindas.md`, curto, e diga que vai fazer sete perguntas, uma de cada
+Sem sede: abra com o **Resumo** de `boas-vindas.md`, curto, e diga que vai fazer oito perguntas, uma de cada
 vez, cada uma com uma sugestão (e mais duas, **A** e **B**, a quem já tem pastas de projeto no computador). Ofereça aprofundar uma seção (sede e Diretoria, cargos, caminho de um pedido,
 onde ficam os arquivos, o que a pessoa decide, o que vai ao GitHub, como pedir ajuda) só se ela pedir. Perfil
 `desenvolvedor`: seja breve. `iniciante`: use as analogias, sem pressa.
@@ -102,7 +104,7 @@ for ligado (versão seguinte). Ela não é pré-requisito de nada do que o InToc
 
 ## 3. As perguntas, nesta ordem
 
-As sete de sempre, mais **A** e **B**, que só entram para quem já tem pastas de projeto. Uma por mensagem, com a
+As oito de sempre, mais **A** e **B**, que só entram para quem já tem pastas de projeto. Uma por mensagem, com a
 explicação curta e o padrão sugerido; aceite "pode ser o padrão".
 
 1. **Nome da sede.** Ex.: "Escritório da Ana". Sugestão: "Meu escritório".
@@ -151,7 +153,13 @@ explicação curta e o padrão sugerido; aceite "pode ser o padrão".
    todos, arquivo de segredo e comando proibido continuam bloqueados, e produção continua perguntando. Não diga
    que o nível "impede" algo: quem segura é o bloqueio do plugin, não o texto. Mais detalhes, só se a pessoa
    pedir: `${CLAUDE_PLUGIN_ROOT}/docs/permissoes.md`.
-7. **Primeiro projeto.** Quem respondeu "não" em A: um projeto novo, como abaixo. Quem respondeu "sim": cada
+7. **Consultor.** "Quer o consultor ativo nos chats, ou prefere chamá-lo quando quiser?" `ativo` (recomendado a quem é
+   `iniciante`) ou `sob_demanda` (recomendado aos outros). Explique em duas frases: o consultor observa o que a pessoa faz e dá, de vez
+   em quando, uma dica curta no nível dela (no máximo uma por conversa, cada uma uma vez só); no modo `sob_demanda` ele só fala
+   quando ela chama `/intoca:consultor`. O **Vigia**, a parte de segurança, fica sempre ligado: avisa quando uma senha aparece no
+   chat. Sem resposta clara, fica `sob_demanda` (o padrão, que nunca surpreende). Texto de apoio, só se a pessoa pedir:
+   `${CLAUDE_PLUGIN_ROOT}/docs/consultor-e-vigia.md`.
+8. **Primeiro projeto.** Quem respondeu "não" em A: um projeto novo, como abaixo. Quem respondeu "sim": cada
    pasta que já existe passa pela etapa 3b, **uma por vez** (só as que a pessoa quiser registrar agora; as outras
    ficam para depois, com `/intoca:comecar`, em "registrar outro projeto"). Nome; **tipo** (`site` ex.: página de uma padaria; `app` ex.: aplicativo de pedidos;
    `servico` ex.: robô que responde clientes; `documento` ex.: um livro ou manual; `relatorio-bi` ex.: painel de
@@ -257,6 +265,11 @@ e que o arquivo vai junto com o projeto se a versão for enviada ao GitHub. **Es
 deixe a escolha com a pessoa. Sem "sim", nada é escrito; o nível do manifesto vale para o porteiro do mesmo jeito, e
 `/intoca:rigor` aplica depois.
 
+**Consultor.** Junto com o rigor, troque no `sede.yaml` a linha comentada `# consultor: ...` de dentro de `sede:` por
+`  consultor: <ativo ou sob_demanda>` (só essa linha; em sede sem a linha comentada, acrescente-a logo abaixo de `perfil:`). O
+consultor guarda só quais dicas já deu e quando, num arquivo da pasta pessoal (`.intoca/consultor.json`), nunca o que a pessoa
+escreveu; depois, `/intoca:consultor ativar` ou `silenciar` muda o modo.
+
 ## 5b. A InToca Sala (a sala de operações): instalar junto, num passo só
 
 Vale para sede nova (logo depois da etapa 5) e para quem pediu em "ver o estado". **Pergunte, nunca imponha.** Explique em
@@ -342,7 +355,7 @@ com um clique. **Oferece, nunca impõe; nunca é efeito de instalar o plugin; a 
 
 Quem começou sem projeto (`"projeto": null`) ainda não tem mensagem de gerente: este passo vale quando o primeiro
 projeto for registrado (etapa 3b, passo 6), que grava a mensagem; até lá, diga que o gerente chega com a primeira pasta.
-A sede com projeto já tem `diretoria/os/DIR-17-mensagem-<projeto>.md` com a primeira mensagem. Conduza em passos curtos: abrir
+A sede com projeto já tem `diretoria/os/DIR-01-mensagem-<projeto>.md` com a primeira mensagem. Conduza em passos curtos: abrir
 um chat **novo** na pasta do projeto, dar a ele o título do padrão escolhido (`gerente.titulo`), colocá-lo na
 seção do projeto da barra lateral, colar a mensagem. Você **não** abre o chat nem cria grupo: um cartão de tarefa
 aninharia o chat sob outro e dentro de uma worktree, e o gerente precisa ficar na pasta principal do projeto.
@@ -356,7 +369,8 @@ um) **na pasta principal do projeto**, e o Git o ignora. A IA entrega só o **mo
 comentários, sem valor) e não lê nem grava o `.env`; **a pessoa copia o modelo e preenche**. Dê o comando do sistema
 dela: `Copy-Item .env.example .env` no Windows; `cp .env.example .env` no Mac e no Linux. **Nunca peça nem aceite
 um segredo no chat**, em nenhum passo: se a pessoa colar um, trate-o como exposto: peça que ela gere um novo no serviço de origem e ponha o novo no `.env` ela mesma.
-Não prometa que o plugin impede tudo: ele nega o que reconhece (ler ou gravar o `.env`).
+Não prometa que o plugin impede tudo: ele nega o que reconhece (ler ou gravar o `.env`). Diga sempre, com estas palavras:
+"Nunca digite senha, token ou chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome." O Vigia avisa quando uma senha aparece no chat, mas não é garantia: só reconhece padrões.
 
 ## 8. Git e GitHub: explicar, não executar
 
@@ -376,7 +390,8 @@ animada: instalada na porta N, com hooks" / "sem hooks" / "não agora" / "faltou
 automática: ligada", "atualização: pela pessoa" (com o passo a passo e o comando `claude plugin update intoca@<catálogo>`) ou "atualização
 automática: não se aplica, catálogo local". Diga também, uma linha por programa, o resultado da etapa 2b: "Git: já estava", "Git: instalado hoje (vale depois de reabrir o Claude Code)"
 ou "Git: recusado; o InToca funciona sem ele"; "Node: 24" (a versão de `maquina.node.versao`; se abaixo de 20, "Node: X, abaixo do 20 que o
-InToca pede"; "Node: instalado hoje" não chega aqui, porque a etapa 2b parou o começo). Quem
+InToca pede"; "Node: instalado hoje" não chega aqui, porque a etapa 2b parou o começo). Diga numa linha o consultor e o Vigia: "Consultor: ativo (uma dica curta de vez em quando)" ou "Consultor: sob demanda
+(`/intoca:consultor` quando quiser)", e "Vigia: sempre ligado". Quem
 começou sem projeto (`"projeto": null`) e ainda não registrou nenhuma pasta: a sede, "nenhum projeto ainda" e o
 próximo passo é registrar a primeira pasta (etapa 3b); o gerente vem depois dela.
 
@@ -393,3 +408,4 @@ próximo passo é registrar a primeira pasta (etapa 3b); o gerente vem depois de
 - Pasta que a pessoa já tem: nunca a mova, copie, renomeie nem apague por conta própria. O único movimento é a ação
   `adotar` com `"como":"mover"`, depois do "sim" da pessoa e com a linha de desfazer à vista; qualquer outro jeito é
   à mão, dela. Nunca abra, leia nem repita o conteúdo de um `.env`.
+- Segredo: "Nunca digite senha, token ou chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome." Nunca peça nem aceite o valor de uma senha, um token ou uma chave, em nenhuma etapa.

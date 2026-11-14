@@ -7,12 +7,16 @@
 // sem efeito colateral, conversa sobre o próprio trabalho e insistência do proprietário ("faz aqui
 // mesmo"). Lê o sede.yaml e o estado da sessão; só grava a marca "lembrete dado"/"insistiu" no estado
 // da sessão (os.tmpdir()/intoca-hooks/<sessão>.json, o mesmo do prompt-os). Sem rede.
-// INTOCA_SEM_AVISO_TROCADO=1 desliga. Nunca derruba o chat: erro interno termina em exit 0 sem saída.
+// Chat de título `Consultor` (PLG-31) não recebe este aviso: não é cargo.
+// Também leva o Vigia e o Consultor (hooks/consultor.mjs, PLG-31), no mesmo processo; o aviso de segredo e a dica
+// saem juntos com o aviso de chat trocado, num só additionalContext.
+// INTOCA_SEM_AVISO_TROCADO=1 desliga o aviso de chat trocado (não o Vigia nem o Consultor). Nunca derruba o chat: erro
+// interno termina em exit 0 sem saída.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   ESTADO, lerEntrada, montarContexto, sessaoValida, arquivoDeEstado, variavelLigada, contem, donoDaWorktree, cargoDoTitulo,
-  textoDoProprietario, projetosDaSigla, forma, projetoNaWorktreeDaSede,
+  textoDoProprietario, projetosDaSigla, forma, projetoNaWorktreeDaSede, ehChatDoConsultor, citaArquivoDeOs,
 } from './lib.mjs';
 
 process.on('uncaughtException', () => process.exit(0));
@@ -104,6 +108,7 @@ function citacoes(prompt, ctx) {
     if (n >= 40) break;
     n += 1;
     const token = m[0].replace(/[.,;:)\]}!?]+$/, '');
+    if (token.length > 4096) continue; // não é caminho citado; resolvê-lo contra cada pasta do manifesto custaria segundos (PLG-31)
     if (!isAbsolute(token)) continue;
     if (process.platform === 'win32' && !/^[A-Za-z]:/.test(token)) continue;
     const caminho = resolve(token);
@@ -248,8 +253,10 @@ function responder(texto) {
 
 // ------------------------------------------------------------ principal
 
-function main() {
-  if (variavelLigada('INTOCA_SEM_AVISO_TROCADO')) return;
+// Uma saída por prompt: o aviso de chat trocado e, depois dele, a voz do Vigia ou a dica do Consultor (PLG-31,
+// hooks/consultor.mjs, importado aqui para não subir outro processo por prompt). Sem nada a dizer: nenhum byte.
+// O import é dinâmico e fica dentro do try: consultor.mjs ausente ou quebrado não suja o stderr nem cala o aviso de chat trocado.
+async function main() {
   const entrada = lerEntrada();
   if (!entrada || typeof entrada.prompt !== 'string') return;
   if (entrada.hook_event_name && entrada.hook_event_name !== 'UserPromptSubmit') return;
@@ -257,14 +264,40 @@ function main() {
   // Mensagem entre chats, notificação do sistema, texto colado, bloco de código e citação não são pedido do
   // proprietário: o que está só ali nunca avisa nem conta como insistência (PLG-25).
   const prompt = textoDoProprietario(entrada.prompt);
-  if (!prompt) return;
-
-  const ctx = montarContexto(entrada);
-  if (!ctx || !ctx.chat) return; // sem sede, manifesto ilegível ou cwd fora de tudo: mudo
-
+  const ctx = montarContexto(entrada); // sem sede, manifesto ilegível ou cwd que não resolve: null (os dois calam)
+  if (!ctx) return;
   const sessao = String(entrada.session_id || '');
   const estado = lerEstado(sessao);
-  if (estado?.avisoTrocado?.insistiu === true) return; // o proprietário já insistiu nesta sessão
+
+  const textos = [];
+  let avisoDoChat = null;
+  if (prompt && ctx.chat && !variavelLigada('INTOCA_SEM_AVISO_TROCADO') && !ehChatDoConsultor(entrada.session_title)) {
+    try { avisoDoChat = chatTrocado(entrada, prompt, ctx, sessao, estado); } catch { avisoDoChat = null; }
+  }
+  if (avisoDoChat) textos.push(avisoDoChat);
+
+  try {
+    const { dicasParaPrompt } = await import('./consultor.mjs');
+    const dica = dicasParaPrompt({
+      entrada, ctx, estado, texto: prompt, avisouTrocado: Boolean(avisoDoChat),
+      marcarSessao: sessaoValida(sessao) ? (id) => marcarConsultor(sessao, id) : null,
+    });
+    if (dica) textos.push(dica.texto);
+  } catch { /* o consultor nunca derruba o aviso */ }
+
+  if (textos.length) responder(textos.join(' '));
+}
+
+// A dica dada nesta sessão (só o id) no estado da sessão: a cadência de uma por sessão.
+function marcarConsultor(sessao, id) {
+  mkdirSync(ESTADO, { recursive: true });
+  const atual = lerEstado(sessao) ?? {};
+  writeFileSync(arquivoDeEstado(sessao), JSON.stringify({ ...atual, consultor: { dica: id } }));
+}
+
+// Aviso de chat trocado (regras 14 e 15): o texto, ou null quando cala.
+function chatTrocado(entrada, prompt, ctx, sessao, estado) {
+  if (estado?.avisoTrocado?.insistiu === true) return null; // o proprietário já insistiu nesta sessão
 
   const norm = semAcento(prompt);
   // "faz aqui mesmo" vale sempre; "mesmo assim" e a resposta curta ("pode seguir.") só depois de um aviso
@@ -272,9 +305,9 @@ function main() {
   const jaAvisou = estado?.avisoTrocado?.avisou === true;
   if (INSISTENCIA.some((re) => re.test(norm)) || (jaAvisou && (APOS_AVISO.test(norm) || RESPOSTA_CURTA.test(norm.trim())))) {
     marcar(sessao, { insistiu: true });
-    return;
+    return null;
   }
-  if (consulta(norm) || PROPRIO_TRABALHO.test(norm.slice(0, TOPO))) return;
+  if (consulta(norm) || PROPRIO_TRABALHO.test(norm.slice(0, TOPO))) return null;
 
   let cargo = cargoDoTitulo(entrada.session_title, ctx.manifesto.titulos);
   if (cargo) {
@@ -317,15 +350,15 @@ function main() {
     // O aviso do executor já cobre a regra 15: conta como o lembrete dado.
     marcar(sessao, { avisou: true, ...(executor && !jaLembrou(executor.os) ? { lembrete: executor.os } : {}) });
     const c = executor && !cargo ? { cargo: 'Executor', os: executor.os } : cargo;
-    responder(aviso({ chat, cargo: c, citados }));
-    return;
+    return aviso({ chat, cargo: c, citados });
   }
   // Prompt que é a própria ordem de executar uma OS: o prompt-os cuida; o lembrete fica para depois.
-  if (/(?:^|[\s"'`@(\\/])os[\\/][^\s"'`]+\.md/i.test(prompt)) return;
+  if (citaArquivoDeOs(prompt)) return null; // linear (PLG-31): a expressão antiga levava dezenas de segundos com os/os/os/...
   if (executor && !jaLembrou(executor.os)) {
     marcar(sessao, { avisou: true, lembrete: executor.os });
-    responder(lembrete(executor.os, executor.recurso));
+    return lembrete(executor.os, executor.recurso);
   }
+  return null;
 }
 
-try { main(); } catch { /* hook nunca derruba o chat */ }
+main().catch(() => { /* hook nunca derruba o chat */ });

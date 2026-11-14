@@ -129,9 +129,12 @@ quando os dois existem).
 
 ## Alternar entre Clássica e Animada
 
-O botão **Animada** só aparece quando ela está registrada em `sala.json` **e** responde a `/api/health`. A raiz do localhost é
-sempre a Clássica e vai para a Animada quando a preferência do navegador (`localStorage`, nunca o manifesto) é
-"animada" e ela está no ar; `/?sala=classica` abre sempre a Clássica (e grava a preferência). Se a Animada cair, a Clássica avisa.
+O botão **Animada** só aparece quando ela está registrada em `sala.json` **e** responde a `/api/health`; o botão **Clássica** da
+Animada abre `/?sala=classica`. Os dois são **visitas**: não gravam nada e não mudam o padrão. O padrão de quem digita `localhost`
+(sem porta) é a preferência do navegador (`localStorage`, nunca o manifesto), e só a caixa **"Abrir a Animada ao digitar localhost"**,
+na Clássica, a muda (ticada grava `animada`, desticada grava `classica`; vale só neste navegador). A caixa aparece quando a Animada
+está registrada, no ar ou não. A raiz do localhost é sempre a Clássica e vai para a Animada quando a preferência é "animada" e ela
+está no ar; `/?sala=classica` não salta. Se a Animada cair, a Clássica fica e avisa.
 
 ## Quem sobe a sala
 

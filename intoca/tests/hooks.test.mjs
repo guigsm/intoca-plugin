@@ -27,6 +27,8 @@ import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { interpretarManifesto, TITULOS_PADRAO, regexDoTitulo, padraoDeTituloValido, cargoDoTitulo, nivelDeRigor, LISTAS_DE_SEGREDO, caminhoDeSegredo } from '../hooks/lib.mjs';
 import { comandoMexeEmEnv } from '../hooks/shell-env.mjs';
+import { pareceSegredo, DICAS, modoDoConsultor, perfilDaPessoa, FRASE_FIXA, textoParaOVigia, dicasParaPrompt } from '../hooks/consultor.mjs';
+import { textoDoProprietario, tirarEnvelopes, citaArquivoDeOs, montarContexto } from '../hooks/lib.mjs';
 import { executar as executarCriar } from '../scripts/criar-sede.mjs';
 import { executar as executarSala } from '../scripts/instalar-sala.mjs';
 
@@ -2639,7 +2641,7 @@ function dimensoesDoPng(arquivo) {
   return { assinatura, largura: b.readUInt32BE(16), altura: b.readUInt32BE(20), bytes: b.length };
 }
 for (const [rotulo, raiz, versao, nomeDeExibicao, versoes] of [
-  ['intoca', PACOTE, '1.0.7', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7']],
+  ['intoca', PACOTE, '1.1.0', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.1.0']],
   // O `intoca-sala` anda por conta própria: sem número fixo aqui, a versão sai do `plugin.json` e as versões, do `CHANGELOG.md` do pacote.
   ['intoca-sala', PACOTE_SALA, null, 'InToca Sala', null],
 ]) {
@@ -2832,7 +2834,7 @@ const TERMOS_PERMITIDOS = {
 const PREFIXOS_DE_OS = ['PLG', 'INT', 'SAL', 'LOC', 'DIR', 'VA', 'CGF', 'JAV', 'APC', 'AUD', juntar('MON', 'TO'), 'CGM', 'MSO', 'GPA', 'ALA', 'PES', 'BOL', 'EST', 'HQ', 'SITE'];
 const ID_DE_OS = new RegExp('\b(?:' + PREFIXOS_DE_OS.join('|') + ')-\d+[a-z]?\b', 'g');
 // Exemplos de formato da sigla da sede e o nome do arquivo que o /intoca:comecar grava: não são OS reais.
-const IDS_DE_EXEMPLO = ['DIR-01', 'DIR-02', 'DIR-17'];
+const IDS_DE_EXEMPLO = ['DIR-01', 'DIR-02'];
 const ehTeste = (rel) => /(^|\/)tests?\//.test(rel) || /\.test\.(mjs|ts)$/.test(rel);
 const emComentario = (linha, indice) => /^\s*(\/\/|\/\*|\*|#)/.test(linha) || /(\/\/|\/\*|<!--)/.test(linha.slice(0, indice));
 function arquivosDosDois() {
@@ -3022,7 +3024,7 @@ casoCom('script: cria a árvore da sede de partida, a pasta do projeto e a mensa
     ...linhasDoIndice().map((l) => l.destino).filter((d) => !existsSync(join(c.sede, ...d.split('/')))),
     ...['AGENTS.md', 'ops/fila.md', 'ops/os/README.md', 'ops/relatorios/README.md', 'ops/autorizacoes/README.md']
       .map((f) => `padaria-da-ana/site/${f}`).filter((d) => !existsSync(join(c.sede, ...d.split('/')))),
-    ...['diretoria/os/DIR-17-mensagem-padaria-da-ana.md'].filter((d) => !existsSync(join(c.sede, ...d.split('/')))),
+    ...['diretoria/os/DIR-01-mensagem-padaria-da-ana.md'].filter((d) => !existsSync(join(c.sede, ...d.split('/')))),
   ];
   return faltam.length === 0 && r.json.gerente.titulo === 'Gerente · Padaria da Ana' ? true : { ok: false, detalhe: `faltam: ${faltam.join(', ')}` };
 });
@@ -3255,7 +3257,7 @@ casoCom('script: a mensagem do primeiro gerente tem o cargo, o título e a carta
   const c = cenarioComecar();
   const ok = deu(rodarCriar(respostas(c), c));
   if (ok !== true) return ok;
-  const t = lerArq(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-padaria-da-ana.md');
+  const t = lerArq(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-padaria-da-ana.md');
   return t.includes('Você assume o cargo de Gerente · Padaria da Ana.') && t.includes('`ops/fila.md`') && t.includes('Gerente · Padaria da Ana')
     && !t.includes(c.base) && !/(?<![A-Za-z])[A-Za-z]:[\\/](?!\/)/.test(t) ? true : { ok: false, detalhe: t.slice(0, 300) };
 });
@@ -3279,6 +3281,22 @@ casoCom('script: ação estado sem pasta acha a sede pelo ponteiro', () => {
   const j = JSON.parse(r.stdout || '{}');
   return j.achada === true && j.origem === 'ponteiro' && mesmo(j.sede, c.sede) ? true : { ok: false, detalhe: r.stdout.slice(0, 300) };
 });
+casoCom('script (numeração em 01): sede que já existe, com a mensagem antiga de número 17, não tem o arquivo renomeado nem apagado; o projeto novo grava DIR-01', () => {
+  const c = cenarioComecar();
+  if (deu(rodarCriar(respostas(c), c)) !== true) return { ok: false, detalhe: 'não criou' };
+  const os = join(c.sede, 'diretoria', 'os');
+  const novaDaSede = join(os, 'DIR-01-mensagem-padaria-da-ana.md');
+  if (!existsSync(novaDaSede)) return { ok: false, detalhe: 'a sede nova não gravou DIR-01' };
+  // Simula a sede feita por uma versão antiga: a mensagem do gerente com o número 17.
+  const antiga = join(os, ['DIR', '17'].join('-') + '-mensagem-padaria-da-ana.md');
+  renameSync(novaDaSede, antiga);
+  const conteudo = readFileSync(antiga, 'utf8');
+  const deNovo = rodarCriar(respostas(c), c); // criar de novo sobre a sede que já existe
+  const r = rodarCriar({ acao: 'projeto', data: '2026-10-27', sede: { pasta: c.sede }, projeto: { nome: 'Livro de Receitas', tipo: 'documento', porte: 'pequeno', sigla: 'LIV' } }, c);
+  const intacta = existsSync(antiga) && readFileSync(antiga, 'utf8') === conteudo;
+  return deNovo.status === 0 && deu(r) === true && intacta && existsSync(join(os, 'DIR-01-mensagem-livro-de-receitas.md'))
+    ? true : { ok: false, detalhe: `intacta=${intacta} criarDeNovo=${deNovo.status} ${r.saida.slice(0, 300)}` };
+});
 casoCom('script: ação projeto cria só a pasta do novo projeto, repete sigla recusada e não mexe no manifesto', () => {
   const c = cenarioComecar();
   if (deu(rodarCriar(respostas(c), c)) !== true) return { ok: false, detalhe: 'não criou' };
@@ -3288,7 +3306,7 @@ casoCom('script: ação projeto cria só a pasta do novo projeto, repete sigla r
   const ok = deu(r);
   if (ok !== true) return ok;
   const repetida = rodarCriar({ ...novo, projeto: { ...novo.projeto, nome: 'Outro Livro', sigla: 'PAD' } }, c);
-  return existsSync(join(c.sede, 'livro-de-receitas', 'principal', 'AGENTS.md')) && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-livro-de-receitas.md'))
+  return existsSync(join(c.sede, 'livro-de-receitas', 'principal', 'AGENTS.md')) && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-livro-de-receitas.md'))
     && readFileSync(join(c.sede, 'sede.yaml'), 'utf8') === antes && r.json.manifesto.itemDoProjeto.includes("nome: 'Livro de Receitas'")
     && recusou(repetida, 'sigla-repetida') === true ? true : { ok: false, detalhe: r.saida.slice(0, 300) };
 });
@@ -3400,7 +3418,7 @@ casoAdo('adotar registrar: simulado não escreve nada, mostra o que criaria e de
     r.json.simulado === true && r.json.movida === false && r.json.criados.length >= 5 && r.json.manifesto.sigla === 'PAN'
       && mesmo(m?.projetos?.[0]?.pasta_atual ?? '.', c.pasta) && !/pastas_antigas/.test(item) && r.json.manifesto.linhaDoMapa.includes('fora da sede')
       ? true : { ok: false, detalhe: JSON.stringify(m) },
-    intacta(c, 'index.html'), existsSync(join(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-padaria-antiga.md')) ? { ok: false, detalhe: 'escreveu a mensagem do gerente' } : true,
+    intacta(c, 'index.html'), existsSync(join(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-padaria-antiga.md')) ? { ok: false, detalhe: 'escreveu a mensagem do gerente' } : true,
   );
 });
 casoAdo('adotar registrar: sem "simular": false só simula, mesmo com confirmado', () => {
@@ -3415,7 +3433,7 @@ casoAdo('adotar registrar: cria ops/ e a carta dentro da pasta, a mensagem do ge
   if (ok !== true) return ok;
   const faltam = ['AGENTS.md', 'ops/fila.md', 'ops/os/README.md', 'ops/relatorios/README.md'].filter((f) => !existsSync(join(c.pasta, ...f.split('/'))));
   return faltam.length === 0 && lerArq(c.pasta, 'index.html') === '<p>minha página</p>\n' && lerArq(c.pasta, 'AGENTS.md').includes('Padaria Antiga')
-    && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-padaria-antiga.md')) && r.json.gerente.titulo === 'Gerente · Padaria Antiga' && r.json.movida === false
+    && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-padaria-antiga.md')) && r.json.gerente.titulo === 'Gerente · Padaria Antiga' && r.json.movida === false
     ? true : { ok: false, detalhe: `faltam: ${faltam.join(', ')}` };
 });
 casoAdo('adotar registrar: AGENTS.md, CLAUDE.md e README próprios ficam como estão, com o texto sugerido para mesclar', () => {
@@ -3468,7 +3486,7 @@ casoAdo('adotar registrar: nenhum caminho de máquina nos arquivos novos da past
   const ok = deu(rodarCriar(pedidoAdotar(c, 'registrar', EXECUTA), c));
   if (ok !== true) return ok;
   const base = c.base.toLowerCase().replace(/\\/g, '/');
-  const achados = [...arquivosDoPacote(c.pasta).filter((r) => r !== 'index.html').map((r) => [c.pasta, r]), ...['diretoria/os/DIR-17-mensagem-padaria-antiga.md'].map((r) => [c.sede, r])]
+  const achados = [...arquivosDoPacote(c.pasta).filter((r) => r !== 'index.html').map((r) => [c.pasta, r]), ...['diretoria/os/DIR-01-mensagem-padaria-antiga.md'].map((r) => [c.sede, r])]
     .filter(([raiz, rel]) => lerArq(raiz, ...rel.split('/')).toLowerCase().replace(/\\/g, '/').includes(base)).map(([, rel]) => rel);
   return achados.length === 0 ? true : { ok: false, detalhe: achados.join(', ') };
 });
@@ -3501,7 +3519,7 @@ casoAdo('adotar mover: pasta com Git limpo anda inteira (o .git vai junto), ganh
   const log = git(d, 'log', '--oneline').stdout;
   return todos(
     r.json.movida === true && !existsSync(c.pasta) && lerArq(d, 'index.html') === '<p>minha página</p>\n' && log.includes('inicial') && existsSync(join(d, 'ops', 'fila.md'))
-      && existsSync(join(d, 'AGENTS.md')) && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-padaria-antiga.md'))
+      && existsSync(join(d, 'AGENTS.md')) && existsSync(join(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-padaria-antiga.md'))
       && mesmo(m?.projetos?.[0]?.pasta_atual ?? '.', d) && m.projetos[0].pastas_antigas?.some((x) => mesmo(x, c.pasta)) ? true : { ok: false, detalhe: r.saida.slice(0, 300) },
     git(d, 'status', '--porcelain').stdout.includes('ops/') ? true : { ok: false, detalhe: 'o Git do destino não enxerga os arquivos novos' });
 });
@@ -3574,7 +3592,7 @@ casoAdo('adotar mover: falha do rename (pasta em uso) vira erro claro, sem estad
     msg(pl).includes('permissão') && !msg(pl).includes('feche o que estiver usando') ? true : { ok: false, detalhe: msg(pl) },
     msg(pw).includes('feche o que estiver usando a pasta') ? true : { ok: false, detalhe: msg(pw) },
     r.json.erros[0].mensagem.includes('feche o que estiver usando a pasta') ? true : { ok: false, detalhe: r.json.erros[0].mensagem },
-    intacta(c, 'index.html'), existsSync(join(c.sede, 'diretoria', 'os', 'DIR-17-mensagem-padaria-antiga.md')) ? { ok: false, detalhe: 'escreveu a mensagem depois da falha' } : true,
+    intacta(c, 'index.html'), existsSync(join(c.sede, 'diretoria', 'os', 'DIR-01-mensagem-padaria-antiga.md')) ? { ok: false, detalhe: 'escreveu a mensagem depois da falha' } : true,
     existsSync(destinoDe(c)) ? { ok: false, detalhe: 'o destino existe' } : true);
 });
 casoAdo('adotar: pasta numa pasta sincronizada — mover é recusado, registrar segue com aviso', () => {
@@ -3700,7 +3718,7 @@ casoAdo('criar com "projeto": null: a sede é criada sem primeiro projeto e rece
   const ok = deu(r);
   if (ok !== true) return ok;
   const m = interpretarManifesto(lerArq(c.sede, 'sede.yaml'));
-  const semMensagem = !existsSync(join(c.sede, 'diretoria', 'os')) || !readdirSync(join(c.sede, 'diretoria', 'os')).some((f) => f.startsWith('DIR-17-mensagem'));
+  const semMensagem = !existsSync(join(c.sede, 'diretoria', 'os')) || !readdirSync(join(c.sede, 'diretoria', 'os')).some((f) => f.startsWith('DIR-01-mensagem'));
   const depois = rodarCriar({ acao: 'adotar', como: 'registrar', simular: false, data: '2026-10-30', sede: { pasta: c.sede }, projeto: { nome: 'Padaria', tipo: 'site', porte: 'pequeno', pasta: c.ext } }, c);
   return r.json.gerente === null && r.json.manifesto === null && m?.projetos?.length === 0 && semMensagem && !/\| Padaria \|/.test(lerArq(c.sede, 'WORKSPACE.md'))
     && deu(depois) === true && existsSync(join(c.ext, 'ops', 'fila.md')) && lerArq(c.ext, 'index.html') === 'x\n'
@@ -4237,7 +4255,7 @@ casoCom('estático: a skill tem as seis perguntas, uma de cada vez, na ordem da 
   const posicoes = ordem.map((p) => t.indexOf(p));
   const crescente = posicoes.every((p, i) => p >= 0 && (i === 0 || p > posicoes[i - 1]));
   const frases = ['Uma por mensagem', 'nunca usei Git', 'uso às vezes', 'desenvolvedor', 'agregadora', 'registro', '`titulos`'.replace('`titulos`', 'Gerente · {projeto}'),
-    'rigor', 'DIR-17', 'Espere o "sim"', 'ponteiro'];
+    'rigor', 'DIR-01', 'Espere o "sim"', 'ponteiro'];
   const faltam = frases.filter((f) => !t.includes(f));
   return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `posições=${posicoes.join(',')} faltam=${faltam.join(' | ')}` };
 });
@@ -4377,11 +4395,11 @@ casoCom('estático: boas-vindas tem o resumo e as sete seções; git-e-github co
   const faltam = [...secoes.filter((s) => !b.includes(s)), ...temas.filter((s) => !g.includes(s))];
   return faltam.length === 0 ? true : { ok: false, detalhe: faltam.join(' | ') };
 });
-casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.0.7', () => {
+casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.1.0', () => {
   const r = lerPacote('README.md');
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
   const faltam = ['/intoca:comecar', '.intoca/sede', 'titulos', 'criar-sede.mjs', 'INTOCA_HOME'].filter((t) => !r.includes(t));
-  return faltam.length === 0 && p.version === '1.0.7' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
+  return faltam.length === 0 && p.version === '1.1.0' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
 });
 casoCom('estático: o script não grava fora do que o regimento permite (sem rm nem cópia; o único rename é o do mover; escrita só com wx)', () => {
   const t = lerPacote('scripts/criar-sede.mjs').replace('renameSync, realpathSync } from', 'realpathSync } from').replace('renomear: renameSync', 'renomear: null');
@@ -6356,9 +6374,9 @@ casoSala('estático: sem rede própria, git nunca pergunta usuário (o clone é 
   return rede.length === 0 && t.includes("GIT_TERMINAL_PROMPT: '0'") && segredo.length === 0
     ? true : { ok: false, detalhe: `rede=${rede.join()} segredo=${segredo.join()}` };
 });
-casoSala('estático: plugin.json na 1.0.7 e o README e o CHANGELOG do pacote trazem a versão', () => {
+casoSala('estático: plugin.json na 1.1.0 e o README e o CHANGELOG do pacote trazem a versão', () => {
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
-  return p.version === '1.0.7' && lerPacote('README.md').includes('versão 1.0.7') && lerPacote('CHANGELOG.md').includes('## [1.0.7] - ') ? true : { ok: false, detalhe: `versão ${p.version}` };
+  return p.version === '1.1.0' && lerPacote('README.md').includes('versão 1.1.0') && lerPacote('CHANGELOG.md').includes('## [1.1.0] - ') ? true : { ok: false, detalhe: `versão ${p.version}` };
 });
 casoSala('estático: o CHANGELOG existe e nenhum arquivo novo cita caminho de máquina', () => {
   const novos = ['scripts/instalar-sala.mjs', 'docs/boas-vindas.md', 'skills/comecar/SKILL.md', 'CHANGELOG.md', 'LICENSE'];
@@ -6671,6 +6689,638 @@ casoWtp('o redirecionamento da governança da sede não muda: diretoria/ de proj
   const c = cenarioWtp();
   const cwd = sub(c.w1, '_infra', 'aplicativo');
   return negaCom(escreve(cwd, sub(cwd, 'diretoria', 'os', 'X-03.md')), sub(c.sede, 'diretoria', 'os', 'X-03.md'));
+});
+
+// ---------------------------------------------------------------- consultor (PLG-31)
+// O Vigia (aviso de segredo no prompt) e o Consultor (uma dica por sessão, no nível do perfil) vivem em hooks/consultor.mjs,
+// importado pelo chat-trocado: os casos rodam o hook de verdade. Cada caso tem a sua sede e a sua "pasta do usuário"
+// (INTOCA_HOME), onde mora o consultor.json; nada toca a pasta real de quem roda. Só nomes fictícios.
+
+const casoCons = (nome, fn) => caso('consultor', nome, fn);
+const FRASE_DO_SEGREDO = 'Nunca digite senha, token ou chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome.';
+const PROMPT_NEUTRO = 'Organize a lista de hoje e revise o texto da apresentação, por favor.';
+// Os segredos de teste são montados por partes: o arquivo vai ao repositório público, e a varredura da publicação barra o texto inteiro.
+const CHAVE_DE_TESTE = juntar('gh', 'p_', 'aB3dE6gH9jK2mN5pQ8sT1vX4zC7fH0jL3nP6');
+
+function manifestoCons(c, { consultor = 'ativo', perfil = 'iniciante', site = {}, doc = {} } = {}) {
+  const campos = (o) => Object.entries(o).filter(([, v]) => v !== undefined).map(([k, v]) => `    ${k}: ${v}`);
+  return [
+    'versao: 1',
+    'sede:',
+    '  nome: Escritorio de teste',
+    ...(perfil === null ? [] : [`  perfil: ${perfil}`]),
+    ...(consultor === null ? [] : [`  consultor: ${consultor}`]),
+    '',
+    'projetos:',
+    '  - nome: padaria-teste',
+    '    sigla: PAD',
+    `    pasta_atual: ${aspasSimples(c.site)}`,
+    ...campos({ tipo: 'site', status: 'ativo', repositorio: 'null', gerente: "'Gerente · padaria-teste'", ...site }),
+    '  - nome: livro-teste',
+    '    sigla: LIV',
+    `    pasta_atual: ${aspasSimples(c.doc)}`,
+    ...campos({ tipo: 'documento', status: 'ativo', repositorio: 'null', ...doc }),
+    '',
+  ].join('\n');
+}
+function cenarioCons(opcoes = {}) {
+  const base = REAL(mkdtempSync(join(raizTeste, 'cons-')));
+  const c = { base, sede: join(base, 'sede'), site: join(base, 'sede', 'padaria'), doc: join(base, 'sede', 'livro'), casa: join(base, 'casa') };
+  for (const d of [c.site, c.doc, join(c.sede, 'diretoria'), c.casa]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(c.sede, 'sede.yaml'), typeof opcoes.manifesto === 'string' ? opcoes.manifesto : manifestoCons(c, opcoes));
+  c.estado = join(c.casa, '.intoca', 'consultor.json');
+  return c;
+}
+const cons = (c, cwd, texto, { titulo, id = sessao(), env = {}, extra = {}, casa = c.casa } = {}) => rodar('chat-trocado', {
+  hook_event_name: 'UserPromptSubmit', cwd, session_id: id, prompt: texto, ...(titulo === undefined ? {} : { session_title: titulo }), ...extra,
+}, { env: { INTOCA_HOME: casa, ...env } });
+// Fala de quem (Consultor ou Vigia), só additionalContext, com os trechos pedidos.
+function falou(r, quem, ...trechos) {
+  const t = contexto(r);
+  const ok = r.status === 0 && r.erro === '' && t.includes(`${quem}:`) && trechos.every((x) => t.includes(x));
+  return ok ? true : { ok: false, detalhe: `esperava ${quem} com ${JSON.stringify(trechos)}; veio ${JSON.stringify(r.saida)} (código ${r.status}${r.erro ? `, stderr=${r.erro.trim()}` : ''})` };
+}
+const nadaSai = (r, rotulo = '') => (semSaida(r) ? true : { ok: false, detalhe: `${rotulo}esperava nenhum byte; veio ${JSON.stringify(r.saida)} (código ${r.status})` });
+// Nem Vigia nem Consultor (o lembrete de foco do executor, que é do chat-trocado, pode sair).
+const semVozes = (r, rotulo = '') => (r.status === 0 && r.erro === '' && !/(?:^|\s)(?:Vigia|Consultor):/.test(contexto(r)) ? true : { ok: false, detalhe: `${rotulo}veio ${JSON.stringify(r.saida)}` });
+const semConsultor =(r, rotulo = '') => (r.status === 0 && !contexto(r).includes('Consultor:') ? true : { ok: false, detalhe: `${rotulo}não esperava dica; veio ${JSON.stringify(r.saida)}` });
+const lerJson = (arquivo) => { try { return JSON.parse(readFileSync(arquivo, 'utf8')); } catch { return null; } };
+const repetirDicas = (c) => spawnSync(process.execPath, [join(HOOKS, 'consultor.mjs'), 'repetir'], {
+  cwd: c.sede, encoding: 'utf8', env: { ...process.env, INTOCA_HOME: c.casa, INTOCA_SEDE: '' }, timeout: TEMPO_LIMITE,
+});
+
+// ------------------------------ sem dica, sem saída
+
+casoCons('prompt neutro: nenhum byte, nos três perfis e nos dois modos, na sede e num projeto sem dica', () => {
+  const rs = [];
+  for (const perfil of ['iniciante', 'ocasional', 'desenvolvedor']) {
+    for (const consultor of ['ativo', 'sob_demanda']) {
+      const c = cenarioCons({ perfil, consultor });
+      rs.push(nadaSai(cons(c, c.sede, PROMPT_NEUTRO), `${perfil}/${consultor}/sede: `), nadaSai(cons(c, c.doc, PROMPT_NEUTRO), `${perfil}/${consultor}/livro: `));
+      if (existsSync(c.estado)) rs.push({ ok: false, detalhe: `${perfil}/${consultor}: gravou o consultor.json sem dica` });
+    }
+  }
+  return todos(...rs);
+});
+
+// ------------------------------ Vigia: o que casa e o que não casa
+
+// Devem casar: segredo de verdade, com valor que tem número ou símbolo, ou com prefixo conhecido de chave e corpo de chave.
+const SEGREDOS_QUE_CASAM = [
+  'minha senha é Laranja2024', // palavra "senha" + "é" + valor com dígito
+  `token: ${CHAVE_DE_TESTE}`, // prefixo ghp_ com corpo de 36 caracteres (e também a palavra token)
+  'a chave sk-live-9f8e7d6c5b4a3210 vazou', // prefixo sk- sem palavra de segredo antes do valor
+  juntar('pass', 'word=', 'Tr0ub', '4dor&3'), // palavra + "=" + valor com símbolo
+  `o acesso é ${juntar('AK', 'IA', '2B3C4D5E6F7G8H9J')}, pode usar`, // prefixo AKIA
+  juntar('-----BEGIN OPENSSH PRI', 'VATE KEY-----'), // cabeçalho de chave privada
+  // Segunda rodada (revisão): nome de variável com `_` antes da palavra, linha de .env.
+  // Montados por partes (nome e valor separados): o gitleaks da integração acusaria a linha inteira.
+  juntar('DB_PASS', 'WORD=', 'Tr0ub', '4dor'),
+  juntar('JWT_SEC', 'RET=', 'abc123', 'def456'),
+  juntar('API_TO', 'KEN=', 'Zx81k', 'q2mP9'),
+  juntar('dbPass', 'word: ', 'Xy12', 'abcd'), // camelCase
+  // Chave entre aspas (JSON, YAML, dicionário) e negrito do Markdown antes do ":".
+  juntar('{"pass', 'word": "', 'Tr0ub', '4dor"}'),
+  juntar("'sen", "ha': '", 'Laranja', "2024'"),
+  juntar('**Sen', 'ha:** ', 'Laranja', '2024'),
+  // Senha dentro de URL.
+  juntar('postgres://admin:', 'S3nh4Forte', '@db.local/app'),
+  // Prefixos de chave de pagamento, Bearer e JWT.
+  juntar('sk_', 'live_', '9f8e7d6c5b4a3210abcd'),
+  juntar('Authorization: Bearer ', 'abc123DEF456', 'ghi789'),
+  juntar('eyJ', 'hbGciOiJI', '.', 'eyJzdWIiOiIx', '.', 'SflKxwRJSM'),
+  // Até três palavras entre a palavra de segredo e o conector.
+  'a senha do roteador é 12345678',
+  'minha senha atual é Laranja2024',
+  // `$` e `%` no começo do valor não são marcador (só o valor inteiro `${VAR}` ou `%VAR%` é).
+  juntar('senha: $', 'Tr0ub', '4dor'),
+  juntar('senha é %', 'Abc', '1234'),
+  '(a senha: abc123).', // parêntese e ponto de fim de frase não são do valor
+];
+// Não devem casar: pergunta sobre senha, marcador, prefixo sem corpo de chave, hash de commit, caminho de arquivo.
+const SEGREDOS_QUE_NAO_CASAM = [
+  'como eu guardo uma senha com segurança?', // sem `:`, `=` nem "é" depois da palavra
+  'a senha fica no .env, certo?', // "fica" não é separador
+  'token: <seu-token>', // marcador entre <...>
+  'chave: xxxxxxxx', // marcador xxx
+  'sk-...', // prefixo sem corpo
+  'ghp_EXEMPLO', // corpo curto e palavra de exemplo
+  'senha: ********', // marcador ***
+  'troquei a senha ontem', // sem separador
+  'o commit 3f9a1c2b7d4e5f60718293a4b5c6d7e8f9012345 corrigiu o bug', // hash de 40 caracteres, sem palavra de segredo
+  'abra o arquivo src/servicos/token-store/leitor.ts', // caminho com "token" no nome
+  'a senha é obrigatória no formulário', // valor só de letras (palavra comum)
+  // Segunda rodada: `_`, `-`, `/` e `.` sozinhos não contam como símbolo; o valor precisa de dígito ou de símbolo como !@#$%&*+.
+  'chave=id_usuario',
+  'token=meu-token-aqui',
+  'senha: ver_arquivo',
+  // Marcador inteiro.
+  'senha: ${DB_PASSWORD}',
+  'senha: <sua-senha>',
+  'password=your_password_here',
+  // Outros que não são segredo.
+  'os tokens: 3 dias', // "tokens" não é a palavra (letra colada) e o valor é curto
+  'postgres://user:password@host/db', // senha só de letras na URL
+  'o código da porta é 4471', // limite aceito: sem palavra de segredo antes, prosa passa (o doc diz)
+];
+casoCons('Vigia: cada segredo da lista casa e cada texto da lista de não-segredo não casa (lista comentada no teste)', () => {
+  const falsosNegativos = SEGREDOS_QUE_CASAM.filter((t) => !pareceSegredo(t));
+  const falsosPositivos = SEGREDOS_QUE_NAO_CASAM.filter((t) => pareceSegredo(t));
+  return falsosNegativos.length === 0 && falsosPositivos.length === 0 ? true
+    : { ok: false, detalhe: `não casou: ${JSON.stringify(falsosNegativos)}; casou por engano: ${JSON.stringify(falsosPositivos)}` };
+});
+casoCons('Vigia: limite aceito (não é garantia): "minha senha é banana", palavra comum, passa sem aviso', () => (pareceSegredo('minha senha é banana') === false ? true : { ok: false, detalhe: 'casou' }));
+casoCons('Vigia: no hook, avisa com a frase fixa e o pedido de trocar a senha, sem repetir o valor', () => {
+  const c = cenarioCons();
+  const rs = SEGREDOS_QUE_CASAM.slice(0, 4).map((t) => {
+    const r = cons(c, c.sede, t);
+    const valor = t.split(/[:=]|\sé\s|\s/).filter((x) => x.length >= 6).pop();
+    const f = falou(r, 'Vigia', FRASE_DO_SEGREDO, 'troque essa senha'.replace('t', 'T'));
+    return f !== true ? f : (contexto(r).includes(valor) ? { ok: false, detalhe: `repetiu o valor de ${t}` } : true);
+  });
+  const naoCasam = SEGREDOS_QUE_NAO_CASAM.slice(0, 4).map((t) => (contexto(cons(c, c.sede, t)).includes('Vigia:') ? { ok: false, detalhe: `avisou em ${t}` } : true));
+  return todos(...rs, ...naoCasam);
+});
+casoCons('Vigia: sem limite por sessão (avisa nos dois prompts) e fala no modo sob_demanda e com o campo ausente', () => {
+  const ativo = cenarioCons();
+  const id = sessao();
+  const sob = cenarioCons({ consultor: 'sob_demanda' });
+  const ausente = cenarioCons({ consultor: null });
+  return todos(
+    falou(cons(ativo, ativo.sede, 'minha senha é Laranja2024', { id }), 'Vigia'),
+    falou(cons(ativo, ativo.sede, 'password=Tr0ub4dor&3', { id }), 'Vigia'),
+    falou(cons(sob, sob.sede, 'minha senha é Laranja2024'), 'Vigia'),
+    falou(cons(ausente, ausente.sede, 'minha senha é Laranja2024'), 'Vigia'),
+  );
+});
+casoCons('Vigia: lê texto colado, não lê mensagem de outro chat nem notificação do sistema', () => {
+  const c = cenarioCons();
+  return todos(
+    falou(cons(c, c.sede, `veja isto <pasted_content id="1">senha: Laranja2024</pasted_content>`), 'Vigia'),
+    nadaSai(cons(c, c.sede, `<cross-session-message from="x">password=Tr0ub4dor&3</cross-session-message>`), 'outro chat: '),
+    nadaSai(cons(c, c.sede, `<system-reminder>token: ${CHAVE_DE_TESTE}</system-reminder>`), 'sistema: '),
+  );
+});
+
+// ------------------------------ cada dica do catálogo: dispara com o gatilho inteiro, e só com ele
+
+casoCons('dica site-sem-git: projeto site com repositorio null e sem .git; calada com .git, com repositório, em documento e sem o campo', () => {
+  const c = cenarioCons();
+  const sim = cons(c, c.site, PROMPT_NEUTRO);
+  const comGit = cenarioCons();
+  mkdirSync(join(comGit.site, '.git'));
+  const comRepo = cenarioCons({ site: { repositorio: 'https://exemplo.invalid/padaria.git' } });
+  const semCampo = cenarioCons({ site: { repositorio: undefined } });
+  const app = cenarioCons({ site: { tipo: 'app' } });
+  return todos(
+    falou(sim, 'Consultor', 'Git', 'git-e-github.md'),
+    nadaSai(cons(comGit, comGit.site, PROMPT_NEUTRO), 'com .git: '),
+    nadaSai(cons(comRepo, comRepo.site, PROMPT_NEUTRO), 'com repositório: '),
+    nadaSai(cons(c, c.doc, PROMPT_NEUTRO), 'documento: '),
+    nadaSai(cons(semCampo, semCampo.site, PROMPT_NEUTRO), 'sem o campo repositorio: '),
+    falou(cons(app, app.site, PROMPT_NEUTRO), 'Consultor', 'git-e-github.md'),
+  );
+});
+casoCons('dica env-sem-valor: cita .env, credencial ou chave de API sem segredo; com segredo fala o Vigia; "env" solto não conta', () => {
+  const a = cenarioCons();
+  const b = cenarioCons();
+  const d = cenarioCons();
+  const e = cenarioCons();
+  return todos(
+    falou(cons(a, a.sede, 'onde eu coloco o arquivo .env do projeto?'), 'Consultor', FRASE_DO_SEGREDO, 'politica-de-segredos.md'),
+    falou(cons(b, b.sede, 'preciso de uma chave de API para o mapa'), 'Consultor', FRASE_DO_SEGREDO),
+    semConsultor(cons(d, d.sede, 'minha senha é Laranja2024 e vai no .env'), 'com segredo: '),
+    nadaSai(cons(e, e.sede, 'o ambiente de teste (env de homologação) está lento'), 'env solto: '),
+  );
+});
+casoCons('dica termo-do-plugin: "o que é uma OS?" e "o que significa fila aqui na sede?"; "o que é os ..." e termo de fora não contam', () => {
+  const a = cenarioCons();
+  const b = cenarioCons();
+  const d = cenarioCons();
+  return todos(
+    falou(cons(a, a.sede, 'o que é uma OS?'), 'Consultor', 'ordem de serviço', '/intoca:memorando OS'),
+    falou(cons(b, b.sede, 'O que significa fila aqui na sede?'), 'Consultor', 'fila', '/intoca:memorando fila'),
+    nadaSai(cons(d, d.sede, 'o que é os dados que faltam na planilha?'), '"os" minúsculo: '),
+    nadaSai(cons(d, d.sede, 'o que é um banco de dados?'), 'termo de fora: '),
+    nadaSai(cons(d, d.sede, 'a OS está pronta'), 'sem pergunta: '),
+  );
+});
+// Termos que também são palavras comuns (relatório, recurso, fila, rigor, plantão) só valem com o contexto do plugin na pergunta
+// (plugin, intoca, sede, "aqui"); OS, Toca, Executor, Memorando, Vigia e Consultor valem sozinhos.
+casoCons('dica termo-do-plugin: termo ambíguo sem contexto não dispara ("fila indiana", "recurso em React"); com contexto e os não ambíguos disparam', () => {
+  const rs = [];
+  for (const t of ['o que é fila indiana?', 'o que é um recurso em React?', 'O que significa fila?', 'o que é rigor científico?', 'o que é um relatório de despesas?', 'o que é plantão médico?']) {
+    const c = cenarioCons();
+    rs.push(nadaSai(cons(c, c.sede, t), `${t}: `));
+  }
+  for (const [t, trecho] of [['o que é um recurso no InToca?', 'recurso'], ['o que é o rigor do plugin?', 'rigor'], ['o que é o Vigia?', 'Vigia'],
+    ['o que é uma Toca?', 'Toca'], ['o que é um Executor?', 'Executor'], ['o que é o Consultor?', 'Consultor'], ['o que é o memorando?', 'Memorando']]) {
+    const c = cenarioCons();
+    rs.push(falou(cons(c, c.sede, t), 'Consultor', trecho));
+  }
+  return todos(...rs);
+});
+casoCons('dica secretaria: pedido de lembrar pendências com a lista na sede; calada sem a lista e no chat da Secretaria', () => {
+  const a = cenarioCons();
+  writeFileSync(join(a.sede, 'diretoria', 'pendencias-do-proprietario.md'), '# Pendências\n');
+  const a2 = cenarioCons();
+  writeFileSync(join(a2.sede, 'diretoria', 'pendencias-do-proprietario.md'), '# Pendências\n');
+  const b = cenarioCons();
+  return todos(
+    falou(cons(a, a.sede, 'o que falta eu fazer hoje?'), 'Consultor', 'Secretaria', '/intoca:secretaria'),
+    nadaSai(cons(a2, a2.sede, 'o que falta eu fazer hoje?', { titulo: 'Secretaria' }), 'chat da Secretaria: '),
+    nadaSai(cons(b, b.sede, 'o que falta eu fazer hoje?'), 'sem a lista: '),
+  );
+});
+casoCons('dica projeto-sem-gerente: pedido de mudança em projeto ativo fora do gerente; calada no gerente, em projeto candidato, em pergunta e depois do aviso de chat trocado', () => {
+  const a = cenarioCons();
+  const candidato = cenarioCons({ doc: { status: 'candidato' } });
+  const avisado = cenarioCons();
+  const id = sessao();
+  gravaEstado(id, { avisoTrocado: { avisou: true } });
+  return todos(
+    falou(cons(a, a.doc, 'altere o título do capítulo dois'), 'Consultor', 'Gerente · livro-teste'),
+    nadaSai(cons(cenarioCons(), a.doc, 'altere o título do capítulo dois', { titulo: 'Gerente · livro-teste' }), 'no gerente: '),
+    nadaSai(cons(candidato, candidato.doc, 'altere o título do capítulo dois'), 'candidato: '),
+    nadaSai(cons(cenarioCons(), a.doc, 'como está o capítulo dois?'), 'pergunta: '),
+    nadaSai(cons(avisado, avisado.doc, 'altere o título do capítulo dois', { id }), 'depois do aviso: '),
+  );
+});
+casoCons('dica projeto-sem-gerente: calada quando o chat-trocado avisa no mesmo prompt (só o aviso sai)', () => {
+  const c = cenarioCons();
+  const r = cons(c, c.doc, 'altere o rodapé do padaria-teste para incluir o telefone');
+  const t = contexto(r);
+  return t.includes('Aviso InToca:') && !t.includes('Consultor:') ? true : { ok: false, detalhe: t };
+});
+casoCons('dica rigor: reclamação de permissão demais; calada sem a reclamação', () => {
+  const a = cenarioCons();
+  const b = cenarioCons();
+  return todos(
+    falou(cons(a, a.sede, 'toda hora pede confirmação, que cansativo'), 'Consultor', '/intoca:rigor'),
+    nadaSai(cons(b, b.sede, 'ajustei o texto da página de contato'), 'sem reclamação: '),
+  );
+});
+casoCons('texto por perfil: a mesma dica tem texto diferente para iniciante, ocasional e desenvolvedor', () => {
+  const textos = ['iniciante', 'ocasional', 'desenvolvedor'].map((perfil) => {
+    const c = cenarioCons({ perfil });
+    return contexto(cons(c, c.sede, 'o que é uma OS?'));
+  });
+  return textos.every((t) => t.startsWith('Consultor:')) && new Set(textos).size === 3 ? true : { ok: false, detalhe: textos.join(' || ') };
+});
+casoCons('perfil ausente ou inválido vale ocasional', () => {
+  const ref = cenarioCons({ perfil: 'ocasional' });
+  const esperado = contexto(cons(ref, ref.sede, 'o que é uma OS?'));
+  const ausente = cenarioCons({ perfil: null });
+  const invalido = cenarioCons({ perfil: 'mestre' });
+  const a = contexto(cons(ausente, ausente.sede, 'o que é uma OS?'));
+  const b = contexto(cons(invalido, invalido.sede, 'o que é uma OS?'));
+  return a === esperado && b === esperado && esperado !== '' ? true : { ok: false, detalhe: `${a} || ${b} || ${esperado}` };
+});
+casoCons('sob_demanda (e campo ausente, e valor ilegível) cala o consultor', () => {
+  const rs = [];
+  for (const consultor of ['sob_demanda', null, "'[ativo'", 'ligado']) {
+    const c = cenarioCons({ consultor });
+    rs.push(nadaSai(cons(c, c.sede, 'o que é uma OS?'), `${consultor}: `), nadaSai(cons(c, c.site, PROMPT_NEUTRO), `${consultor}/site: `));
+  }
+  return todos(...rs);
+});
+casoCons('catálogo: cada dica tem id único e texto nos três perfis, começando por "Consultor:" no hook e com até 70 palavras', () => {
+  const ids = DICAS.map((d) => d.id);
+  const dados = { nome: 'padaria-teste', gerente: 'Gerente · padaria-teste', def: 'o arquivo de teste', arg: 'OS', k: 'os' };
+  const problemas = [];
+  if (new Set(ids).size !== ids.length) problemas.push('id repetido');
+  for (const d of DICAS) {
+    if (!/^[a-z0-9-]{1,40}$/.test(d.id)) problemas.push(`id ${d.id}`);
+    for (const perfil of ['iniciante', 'ocasional', 'desenvolvedor']) {
+      const t = typeof d.textos?.[perfil] === 'function' ? d.textos[perfil](dados) : '';
+      const palavras = t.split(/\s+/).filter(Boolean).length;
+      if (!t || palavras > 70) problemas.push(`${d.id}/${perfil}: ${palavras} palavras`);
+    }
+  }
+  const esperado = ['site-sem-git', 'env-sem-valor', 'termo-do-plugin', 'secretaria', 'projeto-sem-gerente', 'rigor'];
+  if (esperado.some((id) => !ids.includes(id))) problemas.push(`faltam: ${esperado.filter((id) => !ids.includes(id)).join(', ')}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+
+// ------------------------------ cadência: uma por sessão, cada uma uma vez só, repetir zera
+
+casoCons('cadência: segunda dica na mesma sessão não fala; nova sessão não repete a dada e pode dar outra; repetir zera', () => {
+  const c = cenarioCons();
+  const s1 = sessao();
+  const r1 = cons(c, c.sede, 'o que é uma OS?', { id: s1 });
+  const r2 = cons(c, c.sede, 'toda hora pede confirmação, que cansativo', { id: s1 });
+  const r3 = cons(c, c.sede, 'o que é uma OS?');
+  const r4 = cons(c, c.sede, 'toda hora pede confirmação, que cansativo');
+  const apagou = repetirDicas(c);
+  const r5 = cons(c, c.sede, 'o que é uma OS?');
+  return todos(
+    falou(r1, 'Consultor', '/intoca:memorando OS'),
+    nadaSai(r2, 'segunda na mesma sessão: '),
+    nadaSai(r3, 'a mesma em outra sessão: '),
+    falou(r4, 'Consultor', '/intoca:rigor'),
+    apagou.status === 0 && JSON.parse(apagou.stdout).apagado === true ? true : { ok: false, detalhe: `repetir: ${apagou.stdout}${apagou.stderr}` },
+    falou(r5, 'Consultor', '/intoca:memorando OS'),
+  );
+});
+casoCons('cadência: o aviso do Vigia não gasta a dica da sessão nem a impede de vir depois', () => {
+  const c = cenarioCons();
+  const id = sessao();
+  return todos(falou(cons(c, c.sede, 'minha senha é Laranja2024', { id }), 'Vigia'), falou(cons(c, c.sede, 'o que é uma OS?', { id }), 'Consultor'));
+});
+casoCons('sem sessão válida não há cadência: o consultor não fala (o Vigia fala)', () => {
+  const c = cenarioCons();
+  return todos(
+    nadaSai(cons(c, c.sede, 'o que é uma OS?', { id: 'id com espaço' }), 'id inválido: '),
+    falou(cons(c, c.sede, 'minha senha é Laranja2024', { id: 'id com espaço' }), 'Vigia'),
+  );
+});
+
+// ------------------------------ privacidade
+
+casoCons('privacidade: com uma chave de teste no prompt, nem a saída, nem o consultor.json, nem o estado da sessão têm o valor, um pedaço dele ou o prompt', () => {
+  const c = cenarioCons();
+  const id = sessao();
+  const prompt1 = `token: ${CHAVE_DE_TESTE}`;
+  const prompt2 = `o que é uma OS? (a chave ${CHAVE_DE_TESTE.slice(0, 4)}${'Z9'.repeat(10)} fica comigo)`; // dispara o Vigia de novo: a dica espera
+  const prompt3 = 'o que é uma OS? a palavra secreta do teste é girassol';
+  const r1 = cons(c, c.sede, prompt1, { id });
+  const r2 = cons(c, c.sede, prompt2, { id });
+  const r3 = cons(c, c.sede, prompt3, { id });
+  const textos = [r1.saida, r2.saida, r3.saida, existsSync(c.estado) ? readFileSync(c.estado, 'utf8') : '', existsSync(join(ESTADO, `${id}.json`)) ? readFileSync(join(ESTADO, `${id}.json`), 'utf8') : ''];
+  const pedacos = [];
+  for (let i = 0; i + 8 <= CHAVE_DE_TESTE.length; i += 1) pedacos.push(CHAVE_DE_TESTE.slice(i, i + 8));
+  const vazou = textos.some((t) => pedacos.some((p) => t.includes(p)) || t.includes('girassol') || t.includes('palavra secreta'));
+  const json = lerJson(c.estado);
+  const soIdsEDatas = json && Object.keys(json).sort().join() === 'dadas,versao'
+    && Object.entries(json.dadas).every(([k, v]) => /^[a-z0-9-]+$/.test(k) && /^\d{4}-\d{2}-\d{2}$/.test(v));
+  const sessaoSoId = lerJson(join(ESTADO, `${id}.json`))?.consultor?.dica === 'termo-do-plugin';
+  return todos(
+    falou(r1, 'Vigia'), falou(r2, 'Vigia'), falou(r3, 'Consultor'),
+    !vazou ? true : { ok: false, detalhe: 'valor, pedaço dele ou o prompt apareceu na saída ou no estado' },
+    soIdsEDatas ? true : { ok: false, detalhe: `consultor.json: ${JSON.stringify(json)}` },
+    sessaoSoId ? true : { ok: false, detalhe: `estado da sessão: ${JSON.stringify(lerJson(join(ESTADO, `${id}.json`)))}` },
+  );
+});
+
+// ------------------------------ mudo
+
+casoCons('mudo (Vigia e Consultor) em Executor, Plantão, executor pela OS da sessão, sem sede e sub-agente', () => {
+  const c = cenarioCons();
+  const idExec = sessao();
+  gravaEstado(idExec, { os: 'PAD-01', executor: true });
+  const segredo = 'minha senha é Laranja2024';
+  const rs = [];
+  for (const texto of [segredo, 'o que é uma OS?']) {
+    rs.push(
+      semVozes(cons(c, c.site, texto, { titulo: 'Executor · PAD-01 ajuste' }), `Executor (${texto}): `),
+      semVozes(cons(c, c.site, texto, { titulo: 'Plantão · Publicação · padaria-teste' }), `Plantão (${texto}): `),
+      semVozes(cons(c, c.sede, texto, { id: idExec }), `executor pela OS (${texto}): `),
+      nadaSai(cons(c, FORA, texto), `sem sede (${texto}): `),
+      nadaSai(cons(c, c.sede, texto, { extra: { agent_id: 'sub-1', agent_type: 'Explore' } }), `sub-agente (${texto}): `),
+    );
+  }
+  return todos(...rs);
+});
+// O Vigia roda antes dos silêncios que são só do Consultor: comando de barra com argumento, envelope de comando e citação de
+// um arquivo de OS. Um segredo ali também foi para a conversa.
+casoCons('Vigia antes do silêncio: comando de barra, envelope de comando e citação de OS calam o Consultor, mas não o Vigia', () => {
+  const rs = [];
+  const segredo = 'DB_PASSWORD=Tr0ub4dor';
+  for (const [rotulo, montar] of [
+    ['comando de barra', (t) => `/intoca:memorando ${t}`],
+    ['envelope de comando', (t) => `<command-name>/intoca:consultor</command-name><command-args>${t}</command-args>`],
+    ['citação de OS', (t) => `veja diretoria/os/PAD-01-ajuste.md e ${t}`],
+  ]) {
+    const c = cenarioCons();
+    rs.push(falou(cons(c, c.sede, montar(segredo)), 'Vigia', FRASE_DO_SEGREDO));
+    const d = cenarioCons();
+    rs.push(nadaSai(cons(d, d.sede, montar('o que é uma OS?')), `${rotulo} sem segredo: `));
+  }
+  return todos(...rs);
+});
+casoCons('chat Consultor: sem aviso de chat trocado nem de pasta errada (com o controle sem o título)', () => {
+  const c = cenarioCons({ consultor: 'sob_demanda' });
+  const outra = join(c.sede, 'rascunhos');
+  mkdirSync(outra, { recursive: true });
+  const pedido = 'Altere o rodapé do padaria-teste para incluir o telefone.';
+  const inicioCom = (titulo) => rodar('pasta-errada', {
+    hook_event_name: 'SessionStart', cwd: outra, session_id: sessao(), source: 'startup', ...(titulo ? { session_title: titulo } : {}),
+  }, { env: { INTOCA_HOME: c.casa } });
+  return todos(
+    avisou(cons(c, c.sede, pedido), 'padaria-teste'),
+    nadaSai(cons(c, c.sede, pedido, { titulo: 'Consultor' }), 'chat-trocado com título Consultor: '),
+    contexto(inicioCom(null)).startsWith('Aviso InToca:') ? true : { ok: false, detalhe: 'controle da pasta-errada não avisou' },
+    nadaSai(inicioCom('Consultor'), 'pasta-errada com título Consultor: '),
+  );
+});
+
+// ------------------------------ estado ruim: nunca derruba, nunca repete
+
+casoCons('estado ruim: consultor.json corrompido recomeça vazio, dá a dica e não a repete depois', () => {
+  const c = cenarioCons();
+  mkdirSync(dirname(c.estado), { recursive: true });
+  writeFileSync(c.estado, '{ isto não é json');
+  const r1 = cons(c, c.sede, 'o que é uma OS?');
+  const r2 = cons(c, c.sede, 'o que é uma OS?');
+  return todos(falou(r1, 'Consultor'), nadaSai(r2, 'repetiu: '), lerJson(c.estado)?.dadas?.['termo-do-plugin'] ? true : { ok: false, detalhe: 'não regravou' });
+});
+casoCons('estado ruim: pasta do usuário que não aceita gravação (.intoca é um arquivo) ou consultor.json que é pasta: sem dica, sem erro; o Vigia segue', () => {
+  const a = cenarioCons();
+  writeFileSync(join(a.casa, '.intoca'), 'arquivo no lugar da pasta');
+  const b = cenarioCons();
+  mkdirSync(b.estado, { recursive: true });
+  return todos(
+    nadaSai(cons(a, a.sede, 'o que é uma OS?'), '.intoca arquivo: '),
+    nadaSai(cons(a, a.sede, 'o que é uma OS?'), '.intoca arquivo, de novo: '),
+    nadaSai(cons(b, b.sede, 'o que é uma OS?'), 'consultor.json pasta: '),
+    falou(cons(a, a.sede, 'minha senha é Laranja2024'), 'Vigia'),
+  );
+});
+casoCons('estado ruim: pasta do usuário ausente (INTOCA_HOME dentro de um arquivo): sem dica, sem erro', () => {
+  const c = cenarioCons();
+  const arquivo = join(c.base, 'nao-e-pasta.txt');
+  writeFileSync(arquivo, 'x');
+  const r = cons(c, c.sede, 'o que é uma OS?', { casa: join(arquivo, 'casa') });
+  return nadaSai(r);
+});
+
+// ------------------------------ robustez (segunda rodada)
+
+// Prompts patológicos de ~200 mil caracteres (o limite do hook). Antes da segunda rodada, `os/os/os/...` levava dezenas de
+// segundos no chat-trocado e milhares de `<system-reminder>` sem fecho, mais de um segundo. O tempo é medido dentro do processo
+// (a partida do Node varia demais para servir de régua); o limite de 500 ms por função é folgado para o que é linear.
+const PATOLOGICOS = {
+  'system-reminder sem fecho': '<system-reminder>'.repeat(11700),
+  'os/os/os sem espaço': 'os/'.repeat(66000),
+  'os/ e .md só no fim, depois de espaço': `${'os/'.repeat(66000)} x.md`,
+  'senha colada sem espaço': 'senha'.repeat(39800),
+  'nome de variável repetido': 'DB_PASSWORD_'.repeat(16500),
+  'esquema:// sem @': 'a://b:c'.repeat(28400),
+  'eyJ repetido': 'eyJ'.repeat(66000),
+  'palavras entre senha e conector': 'senha palavra '.repeat(14200),
+};
+casoCons('tempo: cada função do Vigia e do texto do proprietário fica abaixo de 500 ms com os prompts patológicos de 200 mil caracteres', () => {
+  const lentos = [];
+  for (const [nome, p] of Object.entries(PATOLOGICOS)) {
+    for (const [fn, f] of [['textoParaOVigia+pareceSegredo', () => pareceSegredo(textoParaOVigia(p))], ['textoDoProprietario', () => textoDoProprietario(p)],
+      ['citaArquivoDeOs', () => citaArquivoDeOs(p)]]) {
+      const t0 = performance.now();
+      f();
+      const ms = performance.now() - t0;
+      if (ms > 500) lentos.push(`${nome} / ${fn}: ${ms.toFixed(0)} ms`);
+    }
+  }
+  return lentos.length === 0 ? true : { ok: false, detalhe: lentos.join('; ') };
+});
+casoCons('hook com prompt patológico de 200 mil caracteres: termina, sem erro e sem saída (dentro do tempo limite do teste)', () => {
+  const c = cenarioCons();
+  const rs = Object.entries(PATOLOGICOS).map(([nome, p]) => nadaSai(cons(c, c.sede, p), `${nome}: `));
+  return todos(...rs);
+});
+casoCons('tirarEnvelopes e citaArquivoDeOs: mesmo resultado da versão antiga nos casos comuns', () => {
+  const env = ['system-reminder', 'cross-session-message'];
+  const casos = [
+    ['a <system-reminder>x</system-reminder> b', 'a   b'],
+    ['a <system_reminder>x</system_reminder > b', 'a   b'],
+    ['a <system-reminder>x', 'a  '],
+    ['a <system-reminder>x<cross-session-message>y</cross-session-message>z</system-reminder> b', 'a   b'],
+    ['sem envelope', 'sem envelope'],
+  ];
+  const errados = casos.filter(([e, s]) => tirarEnvelopes(e, env) !== s).map(([e]) => `${e} → ${JSON.stringify(tirarEnvelopes(e, env))}`);
+  const os = [['Execute os/PAD-01-x.md', true], ['Execute @diretoria/os/DIR-01-x.md agora', true], ['(os/X-1.md)', true], ['os/x.txt', false], ['fotos/x.md', false], ['o sos/x.md', false]];
+  const errosOs = os.filter(([t, v]) => citaArquivoDeOs(t) !== v).map(([t]) => t);
+  return errados.length === 0 && errosOs.length === 0 ? true : { ok: false, detalhe: [...errados, ...errosOs].join(' | ') };
+});
+casoCons('cadência (7a): sem conseguir marcar a sessão, não dá dica e não grava o consultor.json', () => {
+  const c = cenarioCons();
+  const antes = process.env.INTOCA_HOME;
+  process.env.INTOCA_HOME = c.casa;
+  try {
+    const entrada = { hook_event_name: 'UserPromptSubmit', cwd: c.sede, session_id: 'cadencia-7a', prompt: 'o que é uma OS?' };
+    const ctx = montarContexto(entrada);
+    const d = dicasParaPrompt({ entrada, ctx, estado: {}, marcarSessao: () => { throw new Error('disco cheio'); } });
+    const gravou = existsSync(c.estado);
+    const ok = dicasParaPrompt({ entrada, ctx, estado: {}, marcarSessao: () => {} }); // controle: com a marca, a dica sai
+    return d === null && !gravou ? (ok?.quem === 'Consultor' ? true : { ok: false, detalhe: 'controle não deu a dica' })
+      : { ok: false, detalhe: `deu ${JSON.stringify(d)}; consultor.json existia: ${gravou}` };
+  } finally {
+    if (antes === undefined) delete process.env.INTOCA_HOME; else process.env.INTOCA_HOME = antes;
+  }
+});
+casoCons('import dinâmico (7c): consultor.mjs ausente ou quebrado não suja o stderr nem cala o aviso de chat trocado', () => {
+  const c = cenarioCons({ consultor: 'sob_demanda' });
+  const rs = [];
+  for (const [rotulo, preparar] of [['ausente', (d) => rmSync(join(d, 'consultor.mjs'))], ['quebrado', (d) => writeFileSync(join(d, 'consultor.mjs'), 'export const x = ;\n')]]) {
+    const pasta = join(c.base, `hooks-${rotulo}`);
+    cpSync(HOOKS, pasta, { recursive: true });
+    preparar(pasta);
+    const r = spawnSync(process.execPath, [join(pasta, 'chat-trocado.mjs')], {
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: c.sede, session_id: sessao(), prompt: 'Altere o rodapé do padaria-teste para incluir o telefone.' }),
+      encoding: 'utf8', timeout: TEMPO_LIMITE, env: { ...process.env, INTOCA_HOME: c.casa, INTOCA_SEDE: '', CLAUDE_PROJECT_DIR: '' },
+    });
+    registrarProblema(r, `chat-trocado com consultor ${rotulo}`);
+    const t = (() => { try { return JSON.parse(r.stdout).hookSpecificOutput.additionalContext; } catch { return ''; } })();
+    rs.push(r.status === 0 && r.stderr === '' && t.startsWith('Aviso InToca:') ? true : { ok: false, detalhe: `${rotulo}: código ${r.status}, stderr=${r.stderr.slice(0, 200)}, saída=${r.stdout.slice(0, 200)}` });
+  }
+  return todos(...rs);
+});
+casoCons('linha de comando (7d): roda pelo caminho de uma junção (realpath dos dois lados) e não roda quando importada', () => {
+  const c = cenarioCons();
+  const juncao = join(c.base, 'hooks-juncao');
+  try { symlinkSync(HOOKS, juncao, 'junction'); } catch (e) { return { ok: true, aviso: `PULADO: não consegui criar a junção (${e.code})` }; }
+  const r = spawnSync(process.execPath, [join(juncao, 'consultor.mjs'), 'estado'], {
+    cwd: c.sede, encoding: 'utf8', timeout: TEMPO_LIMITE, env: { ...process.env, INTOCA_HOME: c.casa, INTOCA_SEDE: '' },
+  });
+  registrarProblema(r, 'consultor.mjs estado pela junção');
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch { /* sem JSON */ }
+  const importado = spawnSync(process.execPath, ['--input-type=module', '-e', `import(${JSON.stringify(pathToFileURL(join(HOOKS, 'consultor.mjs')).href)})`], { encoding: 'utf8', timeout: TEMPO_LIMITE });
+  return j?.modo === 'ativo' && j.perfil === 'iniciante' && importado.stdout === '' && importado.status === 0
+    ? true : { ok: false, detalhe: `junção: ${r.stdout.slice(0, 200)} ${r.stderr.slice(0, 200)}; importado: ${importado.stdout.slice(0, 100)}` };
+});
+
+// ------------------------------ leitor do manifesto (sede.consultor e sede.perfil)
+
+casoCons('leitor do manifesto: consultor ativo, sob_demanda, ausente, ilegível, repetido com valores diferentes, fora da sede e em linha', () => {
+  const m = (sede, resto = '') => interpretarManifesto(`versao: 1\n${sede}\n${resto}projetos: []\n`);
+  const casos = [
+    ['sede:\n  nome: x\n  consultor: ativo', 'ativo', 'ativo'],
+    ['sede:\n  nome: x\n  consultor: sob_demanda', 'sob_demanda', 'sob_demanda'],
+    ['sede:\n  nome: x', undefined, 'sob_demanda'],
+    ['sede:\n  nome: x\n  consultor: "ativo', '(ilegível)', 'sob_demanda'],
+    ['sede:\n  nome: x\n  consultor: ativo\n  consultor: sob_demanda', '(ilegível)', 'sob_demanda'],
+    ['sede:\n  nome: x\n  consultor: ativo\n  consultor: ativo', 'ativo', 'ativo'],
+    ['sede:\n  nome: x', '(ilegível)', 'sob_demanda', 'consultor: ativo\n'],
+    ['sede: {nome: x, consultor: ativo}', 'ativo', 'ativo'],
+    ['sede:\n  nome: x\n  # consultor: ativo', undefined, 'sob_demanda'],
+    ['sede:\n  nome: x\n  consultor: Ativo', 'Ativo', 'ativo'],
+  ];
+  const erros = casos.filter(([sede, cru, modo, resto]) => {
+    const r = m(sede, resto);
+    return r?.consultor !== cru || modoDoConsultor(r) !== modo;
+  }).map(([sede, cru, modo, resto]) => `${JSON.stringify(sede + (resto ?? ''))} → ${JSON.stringify(m(sede, resto)?.consultor)}/${modoDoConsultor(m(sede, resto))} (esperava ${cru}/${modo})`);
+  const perfis = [['sede:\n  perfil: desenvolvedor', 'desenvolvedor'], ['sede:\n  nome: x', 'ocasional'], ['sede:\n  perfil: mestre', 'ocasional']]
+    .filter(([sede, p]) => perfilDaPessoa(m(sede)) !== p).map(([s]) => `perfil ${s}`);
+  return erros.length === 0 && perfis.length === 0 ? true : { ok: false, detalhe: [...erros, ...perfis].join(' | ') };
+});
+casoCons('leitor do manifesto: os campos novos do projeto (tipo, status, repositorio, gerente) são lidos, e o rigor não mudou', () => {
+  const r = interpretarManifesto("sede:\n  rigor: cauteloso\nprojetos:\n  - nome: a\n    tipo: site\n    status: ativo\n    repositorio: null\n    gerente: 'Gerente · a'\n");
+  const p = r?.projetos?.[0];
+  return p?.tipo === 'site' && p.status === 'ativo' && p.repositorio === null && p.gerente === 'Gerente · a' && r.rigor === 'cauteloso' && nivelDeRigor(r).nivel === 'cauteloso'
+    ? true : { ok: false, detalhe: JSON.stringify(r) };
+});
+
+// ------------------------------ textos: frase fixa, pergunta do começar, versão, assistente, triagem e Diretoria
+
+const plano = (t) => t.replace(/\s+/g, ' ');
+casoCons('frase fixa de segredo, literal, em todos os textos do assunto', () => {
+  const arquivos = ['hooks/consultor.mjs', 'skills/consultor/SKILL.md', 'skills/comecar/SKILL.md', 'docs/politica-de-segredos.md', 'docs/consultor-e-vigia.md',
+    'templates/sede/diretoria/memorando.md', 'templates/sede/AGENTS.md', 'agents/vigia.md'];
+  const faltam = arquivos.filter((rel) => !plano(lerPacote(rel)).includes(FRASE_DO_SEGREDO));
+  return faltam.length === 0 && FRASE_FIXA === FRASE_DO_SEGREDO ? true : { ok: false, detalhe: `faltam: ${faltam.join(', ')}` };
+});
+casoCons('comecar: a pergunta do consultor existe, entre o rigor e o primeiro projeto, com os dois modos, o Vigia e a gravação no sede.yaml', () => {
+  const t = lerPacote('skills/comecar/SKILL.md');
+  const ordem = ['**Rigor das permissões.**', '**Consultor.**', '**Primeiro projeto.**'].map((p) => t.indexOf(p));
+  const crescente = ordem.every((p, i) => p >= 0 && (i === 0 || p > ordem[i - 1]));
+  const frases = ['Quer o consultor ativo nos chats, ou prefere chamá-lo quando quiser?', '`ativo`', '`sob_demanda`', 'Vigia', 'sempre ligado',
+    'consultor: <ativo ou sob_demanda>','faça **uma vez** a pergunta 7', 'oito perguntas'];
+  const faltam = frases.filter((f) => !plano(t).includes(f));
+  return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `ordem=${ordem.join(',')} faltam=${faltam.join(' | ')}` };
+});
+casoCons('versão 1.1.0 no plugin.json, no README e no CHANGELOG', () => {
+  const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
+  return p.version === '1.1.0' && lerPacote('README.md').includes('versão 1.1.0') && lerPacote('CHANGELOG.md').includes('## [1.1.0] - ')
+    ? true : { ok: false, detalhe: `versão ${p.version}` };
+});
+casoCons('assistente vigia: só ferramentas de leitura, modelo sonnet, não lê valor de .env e manda vigilância contínua para Rotina', () => {
+  const t = lerPacote('agents/vigia.md');
+  const fm = t.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
+  const ferramentas = fm.match(/^tools:\s*(.*)$/m)?.[1]?.split(',').map((x) => x.trim()) ?? [];
+  const ok = ferramentas.sort().join() === 'Glob,Grep,Read' && /^model: sonnet$/m.test(fm) && /^name: vigia$/m.test(fm)
+    && t.includes('Nunca lê o valor de um `.env`') && t.includes('Rotina');
+  return ok ? true : { ok: false, detalhe: `tools=${ferramentas.join(',')}` };
+});
+casoCons('skill consultor: frontmatter estrito e os seis argumentos; triagem com a linha de relevância; Diretoria abre o chat Consultor; Vigia não é cargo', () => {
+  const s = lerPacote('skills/consultor/SKILL.md');
+  const tri = lerPacote('skills/triagem/SKILL.md');
+  const dir = lerPacote('skills/diretoria/SKILL.md');
+  const agentes = lerPacote('templates/sede/AGENTS.md');
+  const problemas = [
+    ...problemasDoFrontmatter(s),
+    ...['ativar', 'silenciar', 'repetir', 'nivel', 'ensinar', 'avaliar'].filter((a) => !s.includes(`\`${a}`)).map((a) => `sem ${a}`),
+    ...(SKILLS.includes('consultor') ? [] : ['skill fora da varredura']),
+    ...(tri.includes('Relevância: valor <alto|médio|baixo> · custo') && tri.includes('recomendo <fazer|adiar|descartar>') && tri.includes('recurso novo') ? [] : ['triagem sem a linha']),
+    ...(dir.includes('## Chat Consultor') && dir.includes('`/intoca:consultor`') && dir.includes('**não é cargo**') ? [] : ['diretoria sem o chat']),
+    ...(/^\| (?:Vigia|Consultor) \|/m.test(agentes.slice(agentes.indexOf('## Cargos e cadeia'), agentes.indexOf('Cadeia de comando'))) ? ['virou cargo'] : []),
+  ];
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+casoCons('hooks.json: nenhuma entrada nova de UserPromptSubmit (o consultor é módulo do chat-trocado)', () => {
+  const h = JSON.parse(lerPacote('hooks/hooks.json'));
+  const scripts = h.hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((x) => x.args.join(' ')));
+  return scripts.length === 2 && scripts.some((s) => s.endsWith('prompt-os.mjs')) && scripts.some((s) => s.endsWith('chat-trocado.mjs'))
+    && lerPacote('hooks/chat-trocado.mjs').includes("await import('./consultor.mjs')") ? true : { ok: false, detalhe: scripts.join(' | ') };
 });
 
 // ---------------------------------------------------------------- limpeza e resumo

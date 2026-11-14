@@ -32,7 +32,9 @@ os gerentes e decide conflitos entre projetos. Ela planeja e acompanha, não exe
 - **Executor:** contratado para uma ordem de serviço, entrega e é arquivado.
 - **Plantão:** quem cuida de uma função recorrente que mexe com o mundo de fora, como publicar um site.
 - **Secretaria:** mantém a lista do que só você pode fazer (abrir chats, dar "pode", configurar o app).
-- **Assistentes:** consultores só de leitura (pesquisar, revisar, auditar). Não alteram nada.
+- **Assistentes:** ajudantes só de leitura (pesquisar, revisar, auditar e o **Vigia**, que confere a segurança). Não alteram nada.
+- **Consultor e Vigia:** o consultor dá, de vez em quando, uma dica curta no seu nível (se você o ligou); o Vigia avisa
+  sempre que uma senha aparece no chat. Nenhum dos dois é cargo. Ver `consultor-e-vigia.md`.
 
 A cadeia de comando é: executor, gerente, Diretoria, você. Gerentes não conversam entre si; o que atravessa
 projetos sobe para a Diretoria.
@@ -80,6 +82,8 @@ segredos antes do primeiro envio. O Git é opcional: o InToca funciona sem ele, 
 - `/intoca:memorando` abre o Memorando de Integração; `/intoca:memorando termos` explica as palavras, `cargos`
   explica quem faz o quê, `fluxo` conta um pedido do começo ao fim.
 - Qualquer chat de cargo explica um termo que você não conheça: basta perguntar "o que é X?".
+- `/intoca:consultor` explica o consultor e o Vigia, liga ou silencia as dicas e ensina um termo no seu nível
+  (`/intoca:consultor ensinar fila`).
 - `/intoca:comecar` outra vez mostra o estado da sede e deixa mudar uma resposta ou registrar outro projeto
   (novo, ou uma pasta que você já tem: deixar onde está ou trazer para a sede).
 

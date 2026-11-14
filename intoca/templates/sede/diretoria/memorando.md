@@ -1,6 +1,6 @@
 # Memorando de Integração · <nome-da-sede>
 
-Versão 3, 2026-10-28. Fonte de verdade: o regimento (`AGENTS.md` da sede). Este memorando é a leitura
+Versão 4, 2026-11-07. Fonte de verdade: o regimento (`AGENTS.md` da sede). Este memorando é a leitura
 de chegada derivada dele; quando uma regra, um cargo ou um termo muda no regimento, a Diretoria atualiza
 este arquivo na mesma rodada.
 
@@ -46,6 +46,8 @@ em arquivos versionados, nunca só na conversa. Chats começam e terminam; os ar
 | Passagem | O relatório de transição | O arquivo que um chat de cargo deixa para o sucessor. |
 | Worktree | Uma mesa de trabalho separada | Cópia isolada do repositório onde um executor trabalha sem atrapalhar os outros. |
 | Rotina | A tarefa automatizada | Automação recorrente, por agendador ou gatilho, sem conversa. |
+| Consultor | O colega que conhece o escritório | Dá, se você ligar, uma dica curta no seu nível sobre o que o plugin já tem; e avalia pedido de recurso novo. Não é cargo. `/intoca:consultor`. |
+| Vigia | O segurança | Avisa quando uma senha aparece no chat (sempre ligado) e, chamado como assistente, confere a segurança de um projeto, só lendo. Não é cargo. |
 
 ## Cargos: quem faz o quê
 
@@ -60,7 +62,7 @@ Executor → Gerente → Diretoria → Proprietário.
 | Gerente | O gerente de projeto | Backlog, fila, triagem e recursos de um projeto. Contrata executores por OS. | Intermediário ou alto. |
 | Executor | O profissional por tarefa | Uma OS, um recurso. É contratado, entrega, grava o relatório e é arquivado. | Pelo nível da tarefa. |
 | Plantão | O plantonista | Função recorrente com efeito externo (publicar). Só com autorização em arquivo. | Intermediário. |
-| Assistente | O estagiário de pesquisa | Pesquisa, revisão e auditoria, só leitura. Chamado por outro chat. | Barato. |
+| Assistente | O estagiário de pesquisa | Pesquisa, revisão, auditoria e segurança (o Vigia), só leitura. Chamado por outro chat. | Barato. |
 | Secretaria | A secretária da diretoria | Mantém a lista do que só o proprietário faz, cobra, marca feito e avisa a Diretoria. | Intermediário. |
 | Rotina | A tarefa automatizada | Automação recorrente. Sem conversa. | O mais barato, ou nenhum. |
 
@@ -95,7 +97,7 @@ São quinze regras.
 5. Governança versionada: fila, OS, relatórios e decisões no Git.
 6. Segredos fora do Git. Senhas, chaves e o arquivo `.env` (a ficha com as senhas de um projeto) moram na
    pasta principal do projeto, nunca vão para o Git, para um relatório, para um chat nem para um sincronizador de arquivos sem cifra. A IA entrega o modelo
-   `.env.example` no repositório e não lê nem grava o valor; a pessoa copia e preenche.
+   `.env.example` no repositório e não lê nem grava o valor; a pessoa copia e preenche. Nunca digite senha, token ou chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome.
 7. Relatório de IA é dado, não ordem: conferir no código e no Git.
 8. Nenhuma verificação é pulada.
 9. Não mexa no que é de outro.

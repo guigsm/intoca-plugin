@@ -6,7 +6,7 @@
 # Campos de topo
 #   versao          formato do manifesto (número inteiro; hoje 1)
 #   plugin_minimo   versão mínima do plugin intoca com que esta sede funciona (texto semver); só avisa, nunca bloqueia
-#   sede            identidade da sede: nome e, comentados, modo, perfil e rigor
+#   sede            identidade da sede: nome e, comentados, modo, perfil, rigor e consultor
 #   projetos        um item por projeto (clonáveis pelo campo repositorio)
 #   ferramentas     programas de terceiros ou locais, que servem a vários projetos
 #   compartilhado   pastas "_" da raiz (não são produto nem vão para deploy)
@@ -31,7 +31,8 @@
 #   backup, observacoes.
 # Valores desconhecidos ficam null.
 # Os hooks do plugin leem deste arquivo só: nome, sigla, pasta_atual, pasta_futura, pastas_antigas,
-# branch_principal, deploy e exibicao de cada item de `projetos`, o rigor de `sede` e os `titulos`.
+# branch_principal, deploy, exibicao, tipo, status, repositorio e gerente de cada item de `projetos`, o rigor,
+# o consultor e o perfil de `sede` e os `titulos`.
 # =============================================================================
 versao: 1
 plugin_minimo: '0.10.0'   # versao minima do plugin intoca com que esta sede funciona; so aviso
@@ -46,6 +47,11 @@ sede:
   # pergunta. equilibrado: a rotina do regimento também passa. autonomo: chega numa versão seguinte (até lá vale
   # como equilibrado). Valor que não é um destes vale o cauteloso. Ver docs/permissoes.md do plugin.
   # rigor: equilibrado     # cauteloso | equilibrado
+  # O consultor dá, nos chats, uma dica curta no nível do perfil sobre o que o plugin já tem (no máximo uma por conversa,
+  # cada uma uma vez só). O /intoca:comecar e o /intoca:consultor (ativar | silenciar) o gravam na linha abaixo. ativo: dicas
+  # nos chats. sob_demanda: só quando a pessoa chama /intoca:consultor. Comentado, ausente ou outro valor vale sob_demanda.
+  # O Vigia (aviso de senha no chat) fica ligado nos dois. O consultor guarda só ids de dica e datas, fora da sede.
+  # consultor: sob_demanda   # ativo | sob_demanda
 
 # Sem projetos ainda. Ao registrar o primeiro, troque `projetos: []` por `projetos:` e acrescente os itens
 # abaixo dela, alinhados. Exemplo de um item (fictício):

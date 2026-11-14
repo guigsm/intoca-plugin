@@ -3,6 +3,23 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.1.0] - 2026-11-07
+
+### Adicionado
+- **Consultor**: dá, nos chats, uma dica curta sobre o que o plugin já tem (Git, `.env`, Secretaria, memorando, rigor, gerente
+  do projeto), no nível do `perfil` da sede, no máximo uma por conversa e cada uma uma vez só. Dois modos, escolhidos no
+  `/intoca:comecar`: `ativo` ou `sob_demanda` (o padrão). Guarda só quais dicas já deu e quando, num arquivo da pasta pessoal;
+  nunca o que a pessoa escreveu.
+- **Vigia**: aviso, sempre ligado, quando uma mensagem parece trazer uma senha, um token ou uma chave. Avisa depois, não bloqueia
+  e não repete o valor. E o assistente `vigia`, que confere a segurança de uma pasta, só lendo.
+- `/intoca:consultor`: ligar e silenciar as dicas, vê-las de novo, mudar o nível, aprender um termo e avaliar se vale criar um
+  recurso novo. A triagem ganha a mesma linha de relevância para recurso novo, e a Diretoria abre um chat Consultor a pedido.
+- `docs/consultor-e-vigia.md`. A frase "Nunca digite senha, token ou chave no chat" entra igual em todo texto sobre segredo.
+
+### Alterado
+- O `/intoca:comecar` faz oito perguntas: a nova é o modo do consultor, depois do rigor. O memorando ganha os termos Consultor e
+  Vigia, e o regimento modelo cita o Vigia entre os assistentes.
+
 ## [1.0.7] - 2026-11-06
 
 ### Alterado

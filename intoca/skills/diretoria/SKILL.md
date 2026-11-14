@@ -59,6 +59,15 @@ aqui é seu. Faça direto, sem encaminhar: consulta sem efeito colateral, pedido
 ao assunto e ao recurso deste chat, conversa sobre o próprio trabalho, e o que o proprietário mandar
 fazer aqui mesmo depois do aviso (faça e registre o desvio).
 
+## Chat Consultor
+
+Quando a pessoa pedir um chat para tirar dúvidas ou pedir sugestões ("quero um chat para perguntar", "quem me explica o
+plugin?"), abra (ou conduza a abertura de) um chat **Consultor**: chat comum, **não é cargo**, fica fora da cadeia de comando e da
+tabela de cargos. Título `Consultor`, na **pasta da sede** (a principal, nunca uma cópia isolada), primeira mensagem
+`/intoca:consultor`. Se o app deixar abrir a conversa nessa pasta sem cópia isolada, abra você; senão, diga os três passos à
+pessoa (chat novo na pasta da sede, o título, a primeira mensagem). Os avisos de chat trocado e de pasta errada não valem
+para ele. O que o consultor recomendar e virar trabalho volta por triagem, aqui ou no gerente do projeto.
+
 ## Memorando
 
 Termo trocado, pedido ao cargo errado ou "o que é X" para um termo do vocabulário? Atenda primeiro e

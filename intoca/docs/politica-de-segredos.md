@@ -7,6 +7,8 @@ Texto de apoio do `/intoca:comecar` e do memorando. Uma tela, em linguagem de qu
 É a **ficha com as senhas de um projeto**: as chaves de acesso ao serviço de hospedagem, ao atendimento, ao banco.
 Cada linha tem um nome e um valor. O nome (`CHAVE_DO_SERVICO`) pode aparecer em qualquer lugar; o **valor** é segredo.
 
+**Nunca digite senha, token ou chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome.**
+
 ## Onde ele mora e por que não vai para o Git
 
 O `.env` real fica na **pasta principal do projeto**: `<projeto>/.env`, ou `.env.<finalidade>` quando o projeto tem
@@ -29,7 +31,8 @@ A IA entrega o modelo `.env.example` no repositório e não lê nem grava o valo
 
 Não lê o `.env`, não escreve nele, não o copia, não o envia a lugar nenhum e não pede o valor no chat. Apagar só com a confirmação da pessoa no app. Se a
 pessoa colar um segredo na conversa, ele já foi exposto: o chat pede que ela gere um novo no serviço de origem (trocar a
-senha ou a chave) e ponha o novo no `.env` ela mesma.
+senha ou a chave) e ponha o novo no `.env` ela mesma. O **Vigia** do plugin avisa na hora quando uma mensagem parece trazer
+uma senha, um token ou uma chave, e repete a frase acima; ele só reconhece padrões e não é garantia (ver `consultor-e-vigia.md`).
 
 ## O que o plugin bloqueia (e o que não promete)
 

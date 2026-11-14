@@ -1,4 +1,4 @@
-# InToca Sede (plugin `intoca`, versão 1.0.7)
+# InToca Sede (plugin `intoca`, versão 1.1.0)
 
 O **InToca Sede** é a camada Claude da sede InToca, empacotada como plugin do Claude Code (identificador `intoca`, comandos `/intoca:...`). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Traz os cargos e as rotinas do
 regimento como skills, os assistentes de leitura como agentes e os hooks que dão contexto, bloqueiam
@@ -14,10 +14,10 @@ Existe um pacote-irmão **opcional**, a **InToca Sala** (`intoca-sala`): o quadr
 
 | Componente | Itens | Como aparece |
 | --- | --- | --- |
-| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar` e `/intoca:rigor`. Claude também as aciona pela descrição. |
+| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor`, `consultor` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar`, `/intoca:rigor` e `/intoca:consultor`. Claude também as aciona pela descrição. |
 | `scripts/` | `criar-sede.mjs`, `aplicar-rigor.mjs`, `instalar-sala.mjs` | Os scripts que o `/intoca:comecar` chama para criar a sede (ver "Começar: `/intoca:comecar`"), para instalar a InToca Sala (ver "A InToca Sala no começo") e que o `/intoca:comecar` e o `/intoca:rigor` chamam para escrever o arquivo de permissões das pastas (ver "Rigor das permissões"). Não são carregados como componente. |
-| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
-| `agents/` | `auditor`, `pesquisador`, `revisor` | Assistentes `intoca:<nome>`, ou `@agent-intoca:revisor` quando chamados à mão. |
+| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md`, `politica-de-segredos.md`, `consultor-e-vigia.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
+| `agents/` | `auditor`, `pesquisador`, `revisor`, `vigia` | Assistentes `intoca:<nome>`, ou `@agent-intoca:revisor` quando chamados à mão. |
 | `hooks/` | `sessao-inicio`, `prompt-os`, `pre-ferramenta`, `parada`, `chat-trocado`, `pasta-errada`, `worktree-criar`, `worktree-remover` | Rodam sozinhos nos eventos abaixo. |
 | `templates/` | `sede/`, `INDICE.md`, `permissoes/` | A sede de partida: a árvore que o `/intoca:comecar` copia para criar uma sede nova (ver "Sede de partida"); e os modelos de `.claude/settings.json` por nível de rigor. Não é carregada como componente. |
 | `LICENSE`, `CHANGELOG.md`, `.claude-plugin/icon.png` | Licença MIT; histórico de mudanças; ícone (provisório: trocá-lo é substituir o arquivo, sem mudar código nem versão) | Não são carregados como componente. |
@@ -122,6 +122,7 @@ Scripts Node sem dependências, chamados em forma exec (`command: node`, caminho
 | `prompt-os.mjs` | `UserPromptSubmit` | Se o prompt manda executar uma OS (`Execute <caminho>/os/<ID>-<tema>.md`), lê o cabeçalho dela e injeta ID, modelo previsto, recurso e autorização. Guarda isso no estado da sessão. Prompt sem OS passa sem saída. |
 | `pre-ferramenta.mjs` | `PreToolUse` (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Read`, `Bash`, `PowerShell`) | Nega escrita em `.env`, `.env.*`, `*.env`, `*.pem`, `*.key` e `.git-credentials`; nega leitura (`Read`) e comandos de shell que leem, copiam ou gravam um `.env` (`cat .env`, `Copy-Item .env.example .env`, `> .env`: ver "Política de segredos"); e nega comandos com `--no-verify`, envio forçado (`push` com `--force` ou `-f`) e `reset --hard`. Os modelos, com qualquer prefixo ou finalidade e terminando em `.example`, `.sample` ou `.template` (`.env.example`, `.env.crm.example`, `hospedagem.env.example`), passam. Desde a 0.4.0, também nega `Write`/`Edit` de governança (`diretoria/...`, `ops/...`) fora do lugar, com o caminho certo no motivo: ver "Avisos e governança fora do lugar". Dentro de uma sede, permite sem perguntar o que cumpre o regimento: ver "Autorização por regra". |
 | `chat-trocado.mjs` | `UserPromptSubmit` | Se o prompt cita **outro projeto** (nome, domínio, sigla em maiúsculas ou pasta), injeta um aviso de uma linha com o destino. Em chat de executor com OS, lembra uma vez por sessão que pedido novo é outra OS. Só `additionalContext`: nunca bloqueia. Ver "Avisos e governança fora do lugar". |
+| `consultor.mjs` | (nenhum: módulo importado pelo `chat-trocado`) | O Vigia (aviso de senha, token ou chave no prompt, sempre ligado) e o Consultor (uma dica curta por sessão, no nível do `perfil`, quando `sede.consultor` é `ativo`). Ver "Consultor e Vigia". |
 | `pasta-errada.mjs` | `SessionStart` (`startup`, `resume`) | Se o chat abriu numa pasta que não é a de nenhum projeto do manifesto (inclusive uma pasta antiga, que migrou), injeta um aviso de uma linha com o destino. Nunca bloqueia. |
 | `parada.mjs` | `Stop` | Se a sessão tem OS detectada e `diretoria/relatorios/<ID>.md` não existe, bloqueia a parada uma única vez por sessão e pede o relatório. |
 | `worktree-criar.mjs` | `WorktreeCreate` (sem matcher; timeout 120 s) | Substitui o `git worktree add` padrão: cria a worktree em `<sede>/_worktrees/<repositório>-<nome>` e imprime o caminho. Ver "Worktrees fora do repositório". |
@@ -135,6 +136,40 @@ onde o plugin esteja ativo, porque as regras 6 e 8 do regimento (segredos fora d
 `--no-verify`) não dependem do projeto. O lado "permitir" e a parte de governança fora do lugar só agem dentro de uma sede. Os cinco de contexto e aviso
 (`sessao-inicio`, `prompt-os`, `parada`, `chat-trocado`, `pasta-errada`) só agem dentro de uma sede. Os dois de worktree valem em qualquer repositório Git, porque o hook substitui a
 criação padrão e não pode "declinar"; fora de uma sede, recriam o local padrão do Claude Code.
+
+## Consultor e Vigia (1.1.0)
+
+Texto para a pessoa: `docs/consultor-e-vigia.md`. Os dois vivem em `hooks/consultor.mjs`, um **módulo** que o `chat-trocado`
+importa: nenhum processo novo por prompt (cada processo de Node custa centenas de milissegundos no Windows). Sem rede e sem
+modelo: regras simples sobre o prompt e o manifesto. Sem nada a dizer, o hook não escreve nenhum byte.
+
+- **Vigia** (sempre ligado): quando o prompt parece trazer uma senha, um token ou uma chave (prefixos `sk-`, `sk_live_`,
+  `sk_test_`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, `xoxp-`, `AIza` com corpo de chave, `Bearer`, JWT e chave privada; URL
+  `esquema://usuario:senha@host`; ou palavra de segredo, solta ou num nome de variável (`DB_PASSWORD`, `JWT_SECRET`, `apiKey`),
+  entre aspas ou em negrito, seguida, com até três palavras no meio, de `:`, `=` ou "é" e de um valor de 6 ou mais caracteres
+  com dígito ou símbolo, que não seja inteiro um marcador como `<seu-token>`, `${VAR}`, `xxx` ou `***`), injeta um aviso que começa com "Vigia:", com a frase fixa ("Nunca digite senha, token ou
+  chave no chat. O valor vai no arquivo `.env`, que só você abre; a IA só fala do nome.") e o pedido de trocar a senha. Avisa
+  **depois**, nunca bloqueia, e nunca repete o valor. Vale a cada prompt em que casar. Lê também texto colado e bloco de
+  código; não lê mensagem de outro chat nem notificação do sistema. Palavra comum como senha passa: não é garantia.
+- **Consultor** (`sede.consultor: ativo`; ausente, ilegível ou outro valor vale `sob_demanda`, com a mesma cautela do
+  `rigor`): no máximo **uma dica por sessão** e **cada dica uma vez só**, no nível do `perfil` da sede (`iniciante`,
+  `ocasional`, `desenvolvedor`; ausente vale `ocasional`). Dicas: projeto `site`, `app` ou `servico` com
+  `repositorio: null` e sem `.git`; prompt que cita `.env`, credencial ou chave de API; pergunta "o que é" um termo do
+  plugin; pedido de lembrar pendências, com a lista da Secretaria na sede; pedido de mudança em projeto `ativo` fora do
+  chat do gerente (calado se o aviso de chat trocado já saiu na sessão); reclamação de permissão demais. O texto começa
+  com "Consultor:". Guarda só os ids das dicas dadas e a data em `<pasta do usuário>/.intoca/consultor.json`
+  (`INTOCA_HOME` desloca), gravado de forma atômica; corrompido recomeça vazio; sem conseguir gravar, não dá dica. Nunca
+  guarda o prompt nem o valor que casou.
+- **Mudos** (os dois): sessão sem sede, sub-agente, chat de `Executor` ou de `Plantão` (pelo título ou pela OS da sessão).
+  Comando de barra e citação de um arquivo de OS calam só o Consultor (o Vigia roda antes). Em `sob_demanda`, só o Vigia
+  fala. Tudo é linear no tamanho do prompt (até 200 mil caracteres): o prompt patológico custa o mesmo que o comum.
+- **Chat `Consultor`**: chat comum, aberto pela Diretoria na pasta da sede, que roda `/intoca:consultor`. Não é cargo; os
+  avisos de chat trocado e de pasta errada não valem para ele.
+- **`/intoca:consultor`**: explica e mostra o modo; `ativar`, `silenciar`, `repetir`, `nivel`, `ensinar <termo>` e
+  `avaliar <pedido>` (a linha de relevância, que a `triagem` também usa no item 1b de recurso novo). A skill lê o estado
+  com `node hooks/consultor.mjs estado` e zera com `repetir`, sempre com o "sim".
+- **Assistente `vigia`**: parecer de segurança de uma pasta (`.env` ou chave versionados, modelo com valor, segredo em
+  texto, origem pública, permissões largas, inventário), só leitura, sem ler o valor de um `.env`.
 
 ## Política de segredos: o `.env` fica na pasta do projeto (0.9.0; correções na 0.9.1)
 
@@ -607,10 +642,11 @@ sem sede e talvez não conheça Git, repositório nem "sede". A skill:
    os scripts e os hooks do plugin são de Node e, sem ele, falham sem aviso; depois, com a ação `verificar`, o Git. O plugin **detecta e nunca
    pergunta se a pessoa tem o programa**: o que existe é presumido; o que falta é oferecido ("Posso instalar o X agora?") e, com o "sim", o Claude
    roda o instalador do sistema (`winget`, `brew` ou o gerenciador da distribuição) e confere de novo. Conta, senha, código e chave seguem só da pessoa.
-3. **Faz sete perguntas, uma de cada vez**, com sugestão: nome da sede; perfil (`nunca usei Git`,
+3. **Faz oito perguntas, uma de cada vez**, com sugestão: nome da sede; perfil (`nunca usei Git`,
    `uso às vezes`, `desenvolvedor`); modo (`agregadora`: os projetos moram dentro da sede; `registro`: a
    sede só aponta onde eles estão); onde fica a sede; padrão do nome dos chats; rigor das permissões
-   (desde a 0.8.0: `cauteloso` ou `equilibrado`, recomendado; o autônomo aparece como "chega depois");
+   (desde a 0.8.0: `cauteloso` ou `equilibrado`, recomendado; o autônomo aparece como "chega depois"); consultor (desde a 1.1.0:
+   `ativo` ou `sob_demanda`);
    primeiro projeto (nome, tipo, pasta, porte, sigla). Quem já tem pastas de projeto responde ainda a duas
    perguntas, **A** e **B**, entre o perfil e o modo (ver "Projetos que você já tem", abaixo). Depois de criar a sede, grava `rigor:` no
    `sede.yaml` e, com outro "sim", aplica o arquivo de permissões na sede e no primeiro projeto.
@@ -618,7 +654,7 @@ sem sede e talvez não conheça Git, repositório nem "sede". A skill:
 5. **Cria a sede** por `scripts/criar-sede.mjs` (Node, sem dependência e sem rede): copia
    `templates/sede/` conforme o `INDICE.md`, preenche os marcadores, escreve o `sede.yaml`, cria a pasta do
    primeiro projeto a partir do modelo do tipo (carta e `ops/`) e grava
-   `diretoria/os/DIR-17-mensagem-<projeto>.md`, a primeira mensagem do gerente. **Nunca sobrescreve nem
+   `diretoria/os/DIR-01-mensagem-<projeto>.md`, a primeira mensagem do gerente. **Nunca sobrescreve nem
    apaga**: o que já existe sai como "já existia". Recusa caminho com `..`, pasta que é link e arquivo que
    passaria por um link, e valida tudo antes de criar o primeiro arquivo. Ações: `criar` (com `"projeto": null`,
    a sede é criada sem primeiro projeto), `projeto` (mais um projeto novo numa sede existente), `adotar` e `olhar`

@@ -10,7 +10,7 @@
 // INTOCA_SEM_AVISO_PASTA=1 (ou INTOCA_SEM_AVISO_TROCADO=1) desliga.
 // Nunca derruba o chat: qualquer erro interno termina em exit 0 sem saída.
 import { relative } from 'node:path';
-import { lerEntrada, montarContexto, variavelLigada, dentroDe, contem, pastaDeWorktree, pastaSemToca } from './lib.mjs';
+import { lerEntrada, montarContexto, variavelLigada, dentroDe, contem, pastaDeWorktree, pastaSemToca, ehChatDoConsultor } from './lib.mjs';
 
 process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
@@ -42,6 +42,7 @@ function main() {
   const entrada = lerEntrada();
   if (!entrada) return;
   if (entrada.hook_event_name && entrada.hook_event_name !== 'SessionStart') return;
+  if (ehChatDoConsultor(entrada.session_title)) return; // chat Consultor (PLG-31): não é cargo, não tem pasta errada
   const ctx = montarContexto(entrada);
   if (!ctx) {
     // Sede só pelo ponteiro e pasta que não é de nenhuma Toca: uma linha, e mais nada (os outros hooks calam).
