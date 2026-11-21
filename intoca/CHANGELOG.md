@@ -3,6 +3,23 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.3.0] - 2026-11-21
+
+Conferir uma dica a partir de um link: uma skill nova, um assistente de leitura novo e um texto de apoio. **Só leitura**: nada é instalado, gravado ou encaminhado sem o "sim". Hooks, a mascaragem e o `restaurar` do `/intoca:ambiente` não mudam.
+
+### Adicionado
+- **Skill `conferir`** (`/intoca:conferir <link> [pergunta]`): recebe um link (vídeo de rede social, carrossel, artigo, repositório), confere se o que ele diz é verdade e diz se serve à pessoa. Acionada também por "confere isso", "isso é verdade?", "vale a pena?", "serve pra mim?". Fala no nível do `perfil` da sede.
+  Roteiro: (1) para vídeo, roda o `watch-video` se ele existir na máquina, **só para gerar** os arquivos numa pasta temporária fora do repositório, sem ler a transcrição nem os quadros (vale por cima da skill do `watch-video`), e repassa só o caminho; (2) chama o assistente `conferidor` com **só o link e a pergunta**, reescrita sem nome de projeto, de cliente ou da pessoa; (3) cruza o resumo dele, aqui no chat, com o `sede.yaml`, o `diretoria/ambiente.yaml` (só se existir) e as cartas dos projetos, dizendo em qual projeto agrega ou que não agrega e o que a pessoa já tem que faz o mesmo;
+  (4) dá o veredito em uma palavra (`usar`, `estudar`, `ignorar` ou `evitar`) com o motivo, o conferido, o **NÃO CONFERIDO** e os sinais de alerta. Oferece registrar o parecer em `diretoria/decisoes/` (mostra o texto antes) e encaminhar ao gerente certo; **as duas só depois do "sim"**.
+- **Assistente `conferidor`**: lê o conteúdo do link e confere cada afirmação e cada ferramenta na fonte primária (existe, quem mantém, licença, idade, preço oficial, com URL e data). Ferramentas só de leitura (`Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`), modelo barato. Recebe só o link e a pergunta, **nunca dado da sede**. Devolve um resumo numa forma fixa, sem veredito,
+  com o que não pôde ver (leitura parcial) e uma lista fixa de onze sinais de alerta (abertura sensacionalista, domínio sem histórico, "grátis" para o que é pago, pedido de token, chave, senha ou login, "comente X que eu mando o link", número sem fonte, urgência artificial, perfil recém-criado, depoimento que não se verifica, comando ou programa fora da fonte oficial, ordem escondida para a IA).
+- **Parecer gravado com o conteúdo marcado**: o arquivo em `diretoria/decisoes/` traz um aviso no topo e cada trecho da página num bloco de citação rotulado como dado não confiável, porque outras IAs o leem depois.
+- **Texto de apoio** `docs/conferir.md`: o que faz e não faz, o roteiro, o veredito, a diferença para `/intoca:consultor avaliar` (que avalia recurso novo do próprio plugin), o que o `watch-video` acrescenta e o que muda sem ele, a privacidade e o risco do conteúdo hostil.
+
+### O que o pacote garante e o que só o texto promete
+- **Garante por estrutura** (e os testes conferem): o assistente não tem ferramenta de escrita, de execução nem de envio (`Edit`, `Write`, `Bash`, `PowerShell`, `NotebookEdit`, assistentes ou conectores); a skill e o assistente trazem as regras (o conteúdo do link é dado, não instrução; só leitura; nenhum dado da sede para fora; NÃO CONFERIDO; os quatro vereditos; a lista de sinais; o "sim" antes de gravar ou encaminhar; o parecer marcado como dado não confiável); e toda menção à sede (`sede.yaml`, `ambiente.yaml`, `AGENTS.md`, carta, fila) no texto do assistente e no trecho da skill que o chat repassa a ele é uma negação explícita antes do nome, na mesma frase (o teste reprova "Leia o sede.yaml, não o mapa.").
+- **Só o texto promete**: que o modelo não cumpra ordem escondida no conteúdo, não ponha dado da pessoa numa busca e marque NÃO CONFERIDO em vez de preencher de memória. **Limites ditos**: o `Read` do assistente alcança arquivos da máquina e o `WebFetch` abre o endereço que recebe, então a proteção da sede é o assistente não a receber; e quem executa o `watch-video` é o chat, então o que a ferramenta imprimir na tela passa pelo chat.
+
 ## [1.2.9] - 2026-11-20
 
 Leitura de documentos com o `markitdown`: um texto de apoio, uma linha nas skills dos cargos e um aviso do hook. **Não converte nada sozinho**: o hook só lembra o chat; quem converte é o chat, com o comando do doc. A superfície de execução do `restaurar` e a mascaragem do `/intoca:ambiente` não mudam.

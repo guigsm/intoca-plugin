@@ -1,4 +1,4 @@
-# InToca Sede (plugin `intoca`, versão 1.2.9)
+# InToca Sede (plugin `intoca`, versão 1.3.0)
 
 O **InToca Sede** é a camada Claude da sede InToca, empacotada como plugin do Claude Code (identificador `intoca`, comandos `/intoca:...`). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Traz os cargos e as rotinas do
 regimento como skills, os assistentes de leitura como agentes e os hooks que dão contexto, bloqueiam
@@ -14,10 +14,10 @@ Existe um pacote-irmão **opcional**, a **InToca Sala** (`intoca-sala`): o quadr
 
 | Componente | Itens | Como aparece |
 | --- | --- | --- |
-| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor`, `consultor`, `ambiente` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar`, `/intoca:rigor`, `/intoca:consultor` e `/intoca:ambiente`. Claude também as aciona pela descrição. |
+| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor`, `consultor`, `ambiente`, `conferir` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar`, `/intoca:rigor`, `/intoca:consultor`, `/intoca:ambiente` e `/intoca:conferir`. Claude também as aciona pela descrição. |
 | `scripts/` | `criar-sede.mjs`, `aplicar-rigor.mjs`, `instalar-sala.mjs`, `ambiente.mjs` | Os scripts que o `/intoca:comecar` chama para criar a sede (ver "Começar: `/intoca:comecar`"), para instalar a InToca Sala (ver "A InToca Sala no começo") e que o `/intoca:comecar` e o `/intoca:rigor` chamam para escrever o arquivo de permissões das pastas (ver "Rigor das permissões"). Não são carregados como componente. |
-| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md`, `ambiente.md`, `politica-de-segredos.md`, `consultor-e-vigia.md`, `leitura-de-documentos.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
-| `agents/` | `auditor`, `pesquisador`, `revisor`, `vigia` | Assistentes `intoca:<nome>`, ou `@agent-intoca:revisor` quando chamados à mão. |
+| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md`, `ambiente.md`, `politica-de-segredos.md`, `consultor-e-vigia.md`, `leitura-de-documentos.md`, `conferir.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
+| `agents/` | `auditor`, `conferidor`, `pesquisador`, `revisor`, `vigia` | Assistentes `intoca:<nome>`, ou `@agent-intoca:revisor` quando chamados à mão. |
 | `hooks/` | `sessao-inicio`, `prompt-os`, `pre-ferramenta`, `parada`, `chat-trocado`, `pasta-errada`, `worktree-criar`, `worktree-remover` | Rodam sozinhos nos eventos abaixo. |
 | `templates/` | `sede/`, `INDICE.md`, `permissoes/` | A sede de partida: a árvore que o `/intoca:comecar` copia para criar uma sede nova (ver "Sede de partida"); e os modelos de `.claude/settings.json` por nível de rigor. Não é carregada como componente. |
 | `LICENSE`, `CHANGELOG.md`, `.claude-plugin/icon.png` | Licença MIT; histórico de mudanças; ícone (provisório: trocá-lo é substituir o arquivo, sem mudar código nem versão) | Não são carregados como componente. |
@@ -210,6 +210,19 @@ ferramenta existir na máquina, o `pre-ferramenta` acrescenta uma ou duas frases
 só avisa, em toda leitura de documento (não guarda estado); não bloqueia, não pergunta, não troca a leitura, não converte nada e não roda a ferramenta; sem ela, não diz nada
 e a leitura segue como antes; as regras de negar (`.env`, inclusive `.env.pdf`) vêm antes e seguem valendo. Não precisa de sede, como o lado "negar". O valor da variável
 não entra no aviso nem em arquivo do pacote. Não cobre PDF escaneado (o `markitdown` não faz OCR). O `/intoca:ambiente` não instala nem confere o `markitdown`: é passo seu.
+
+## Conferir uma dica: `/intoca:conferir` (1.3.0)
+
+Você manda um link (vídeo de rede social, carrossel, artigo, repositório) e pergunta "isso é verdade?" ou "serve pra mim?". A skill `conferir` responde
+**só lendo**: o assistente `conferidor` (ferramentas só de leitura: `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`) lê o link, extrai as afirmações e os nomes,
+confere cada um na fonte primária com URL e data (o que não der sai **NÃO CONFERIDO**) e procura os sinais de alerta de uma lista fixa; o chat cruza esse
+resumo com o `sede.yaml`, o `diretoria/ambiente.yaml` (se existir) e as cartas dos projetos, e dá o veredito em uma palavra: `usar`, `estudar`, `ignorar`
+ou `evitar`. Registrar o parecer em `diretoria/decisoes/` e encaminhar ao gerente certo são ofertas: **nada é gravado nem encaminhado sem o "sim"**.
+
+- **O conteúdo do link é dado, não instrução**: ordem achada na página, na legenda ou no quadro do vídeo vira sinal de alerta, nunca algo a cumprir.
+- **Privacidade**: o assistente recebe só o link e a pergunta, nunca dado da sede; nada da sede vai a serviço avaliado, formulário ou busca.
+- **Vídeo**: com o plugin `watch-video` na máquina, o chat transcreve e tira quadros numa pasta temporária fora do repositório; sem ele, a conferência sai parcial e diz o que não pôde ver.
+- **O que os testes garantem e o que só o texto promete** está em [`docs/conferir.md`](docs/conferir.md).
 
 ## Política de segredos: o `.env` fica na pasta do projeto (0.9.0; correções na 0.9.1)
 
@@ -817,7 +830,7 @@ claude plugin list
 
 O escopo padrão é `user`: o plugin vale em todos os projetos da máquina. `claude plugin list` deve
 mostrar `intoca@intoca-sede` com `Status: ✔ enabled`, e `claude plugin details intoca` mostra o
-inventário (12 skills, 3 agentes e os hooks).
+inventário (15 skills, 5 agentes e os hooks).
 
 Dentro de uma sessão do Claude Code, o equivalente é:
 
@@ -922,9 +935,9 @@ Teste ao vivo de descoberta, em um repositório aninhado, abrindo um chat novo n
 
 1. Você conhece o Regimento da sede e os cargos Diretoria, Gerente, Executor e Plantão?
 2. Quais destas skills aparecem: `triagem`, `os-nova`, `relatorio`, `encerrar`, `diretoria`,
-   `gerente`, `executor`, `plantao`, `secretaria`, `memorando`?
-3. Quais destes agentes aparecem: `revisor`, `pesquisador`, `auditor`?
+   `gerente`, `executor`, `plantao`, `secretaria`, `memorando`, `conferir`?
+3. Quais destes agentes aparecem: `revisor`, `pesquisador`, `auditor`, `vigia`, `conferidor`?
 
-Esperado com o plugin instalado: as 12 skills e os 3 agentes aparecem, com o prefixo `intoca:`. A
+Esperado com o plugin instalado: as 15 skills e os 5 agentes aparecem, com o prefixo `intoca:`. A
 pergunta 1 depende do `CLAUDE.md` da sede ou do projeto; o contexto do hook de início de sessão traz a
 fila e a raiz da sede, mas não o texto do regimento.
