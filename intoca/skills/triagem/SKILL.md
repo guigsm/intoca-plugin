@@ -5,7 +5,8 @@ description: Acione antes de executar qualquer pedido do proprietário que alter
 
 # Triagem
 
-Resposta curta, dada antes de agir, que o proprietário aprova com "vai".
+Resposta curta, dada antes de agir, que o proprietário aprova com "vai". O "vai" vale dado no chat do
+gerente ou, pela Diretoria, gravado em `diretoria/palavras/` (regra 4).
 
 ## Quando não fazer
 
@@ -23,7 +24,8 @@ Resposta curta, dada antes de agir, que o proprietário aprova com "vai".
 3. **Destino:** o próprio gerente, subagente, chat existente ou chat novo.
 4. **Recurso e ocupação:** livre agora, ou na fila atrás de quem. Conferir `fila.md`.
 5. **Executor:** modelo e esforço.
-6. **O que depende do proprietário:** decisões e "pode".
+6. **O que depende do proprietário:** decisões e "pode". Cada palavra dele vale no chat do gerente ou, gravada
+   pela Diretoria, em `diretoria/palavras/`.
 7. **Plano** em 2 a 4 passos.
 
 ## Níveis
@@ -63,5 +65,6 @@ Vai?
 
 ## Depois do "vai"
 
-Se for para executor, acionar a skill `os-nova`. Se o gerente executa direto, registrar o recurso
+Se o "vai" veio pela Diretoria, conferir o arquivo de `diretoria/palavras/` antes: o que ele diz é o que vale,
+e palavra ambígua ou que não cobre a OS volta como dúvida, sem executar. Se for para executor, acionar a skill `os-nova`. Se o gerente executa direto, registrar o recurso
 como ocupado na fila antes de começar.

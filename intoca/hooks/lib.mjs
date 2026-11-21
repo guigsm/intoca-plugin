@@ -1034,6 +1034,53 @@ export function variavelLigada(nome) {
   return Boolean(v) && v !== '0';
 }
 
+// ------------------------------------------------------------ leitura de documentos (markitdown)
+
+// Extensões de documento que o aviso do `Read` cobre. `html` fica de fora (quase sempre é código que se lê direto).
+export const EXTENSOES_DE_DOCUMENTO = new Set(['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'msg', 'epub']);
+export const VARIAVEL_DO_MARKITDOWN = 'INTOCA_MARKITDOWN';
+
+// O arquivo é um executável de verdade? Só olha o disco: não executa o arquivo nem segue texto como comando.
+// Caminho de rede (UNC: `\\servidor\...` ou `//servidor/...`, e o prefixo de dispositivo `\\?\`) nunca conta: olhá-lo pode esperar
+// a rede por segundos, e o hook tem 5 s. Mesmo critério do `alvoDe` do pre-ferramenta.
+const ehCaminhoDeRede = (caminho) => /^[\\/]{2}/.test(caminho);
+
+function ehExecutavel(caminho, plataforma) {
+  try {
+    if (ehCaminhoDeRede(caminho)) return false;
+    const st = statSync(caminho);
+    if (!st.isFile()) return false;
+    if (plataforma === 'win32') return /\.(?:exe|cmd)$/i.test(caminho);
+    return (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+// A ferramenta `markitdown` existe nesta máquina? (1) a variável INTOCA_MARKITDOWN com o caminho completo de um
+// executável que existe; senão (2) um executável `markitdown` numa pasta absoluta do PATH. Só lê o disco: sem rede,
+// sem `spawn`, sem seguir texto como comando. Devolve só verdadeiro ou falso: o valor da variável nunca sai daqui.
+// `ambiente` e `plataforma` existem para o teste; o hook usa os do processo.
+export function markitdownDisponivel(ambiente = process.env, plataforma = process.platform) {
+  try {
+    const indicado = ambiente[VARIAVEL_DO_MARKITDOWN];
+    if (typeof indicado === 'string' && indicado !== '' && indicado.length <= 4096 && !indicado.includes('\0')
+      && !ehCaminhoDeRede(indicado) && isAbsolute(indicado) && ehExecutavel(indicado, plataforma)) return true;
+    const path = plataforma === 'win32' ? (ambiente.Path ?? ambiente.PATH) : ambiente.PATH;
+    if (typeof path !== 'string' || path === '') return false;
+    const nomes = plataforma === 'win32' ? ['markitdown.exe', 'markitdown.cmd'] : ['markitdown'];
+    const separador = plataforma === 'win32' ? ';' : ':';
+    for (const bruta of path.split(separador)) {
+      const pasta = plataforma === 'win32' ? bruta.replace(/^"(.*)"$/, '$1') : bruta;
+      if (pasta === '' || pasta.includes('\0') || ehCaminhoDeRede(pasta) || !isAbsolute(pasta)) continue; // vazia, de rede ou relativa (= pasta atual): não conta
+      for (const nome of nomes) if (ehExecutavel(join(pasta, nome), plataforma)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Contexto da sessão: sede, manifesto e quem é o chat. null quando não há sede, o manifesto é
 // ilegível ou o cwd não resolve. `ctx.chat` pode ser null (cwd fora de qualquer projeto e da sede).
 // Não olha variável de silêncio nenhuma: quem chama decide.

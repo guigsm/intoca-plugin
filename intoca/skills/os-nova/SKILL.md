@@ -9,7 +9,8 @@ Gera o arquivo que contrata um executor. A OS precisa ser lida sozinha, em um ch
 
 ## Antes
 
-- Triagem aprovada com "vai" (ou "vai direto").
+- Triagem aprovada com "vai" (ou "vai direto"), dado no chat do gerente ou, pela Diretoria, gravado em
+  `diretoria/palavras/`. Neste caso, a OS cita o arquivo da palavra no cabeçalho.
 - Recurso confirmado livre na fila, ou o executor entra atrás de quem o tem.
 - Um recurso por OS. Se forem dois, são duas OS.
 

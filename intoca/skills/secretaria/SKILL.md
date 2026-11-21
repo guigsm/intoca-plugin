@@ -33,6 +33,7 @@ Cargo da sede. Um chat. Cuida da lista do que só o proprietário faz. Não exec
   linha. O arquivo vale mais que a mensagem.
 - Perguntar, sem insistir, o que parece feito pelo Git ou pela fila e ainda está aberto.
 - Item que depende de outra pessoa ou de decisão que não é do proprietário vai à Diretoria.
+- Documento (PDF, DOCX, PPTX, XLSX, XLS, MSG, EPUB): antes de abrir cru, converta com o `markitdown` se ele existir na máquina e leia só o trecho; sem ele, leia como sempre. Regras em `${CLAUDE_PLUGIN_ROOT}/docs/leitura-de-documentos.md`.
 
 ## Ao terminar
 

@@ -25,7 +25,7 @@ Rode a ação `estado` (`{"acao":"estado"}`). Se `achada` for verdadeiro, ou se 
 **não recrie nada**: mostre em poucas linhas o nome, o modo, o perfil e os projetos da sede, e ofereça (a) mudar
 uma resposta, (b) registrar outro projeto, (c) ler o memorando (`/intoca:memorando`). Não pergunte de novo o
 que já está no manifesto. Ofereça também (d) ver ou trocar o rigor das permissões (`/intoca:rigor`), (e) instalar a InToca
-Sala, se ainda não estiver (etapas 5b e 5c) e (f) ligar a atualização automática do InToca (fim da etapa 5b). Se a `sede:` do
+Sala, se ainda não estiver (etapas 5b e 5c), (f) ligar a atualização automática do InToca (fim da etapa 5b) e (g) registrar ou refazer o ambiente do Claude (`/intoca:ambiente`). Se a `sede:` do
 `sede.yaml` não tem a linha `consultor:`, faça **uma vez** a pergunta 7 (o consultor) e grave a resposta como na etapa 5, inclusive
 `sob_demanda`: com a linha gravada, a pergunta não volta. Se o estado trouxer `avisoDeVersao`, repita-o em uma frase (o plugin instalado é
 mais velho que o `plugin_minimo` da sede: é só um aviso, nada se bloqueia). Sede sem `plugin_minimo` (feita antes da 0.10.0):
@@ -394,6 +394,8 @@ InToca pede"; "Node: instalado hoje" não chega aqui, porque a etapa 2b parou o 
 (`/intoca:consultor` quando quiser)", e "Vigia: sempre ligado". Quem
 começou sem projeto (`"projeto": null`) e ainda não registrou nenhuma pasta: a sede, "nenhum projeto ainda" e o
 próximo passo é registrar a primeira pasta (etapa 3b); o gerente vem depois dela.
+
+Termine com **uma linha**, sem executar nada: "Para guardar o mapa do seu ambiente do Claude (plugins, catálogos, MCP, ferramentas) ou refazê-lo numa máquina nova, existe o `/intoca:ambiente`."
 
 ## Regras
 

@@ -58,7 +58,8 @@ não conhecer a hierarquia, os documentos ou o vocabulário. A Diretoria o atual
 
 Cadeia de comando: Executor → Gerente → Diretoria → Proprietário.
 
-- O proprietário fala com um chat por projeto: o gerente.
+- O proprietário fala com o gerente do projeto ou com a Diretoria, à escolha dele. A Diretoria recebe a
+  palavra dele sobre qualquer projeto, grava em arquivo e repassa ao gerente (regra 4).
 - Gerentes não conversam entre si. O que atravessa projetos sobe para a Diretoria.
 - A Diretoria nomeia os gerentes e arbitra conflito de recurso entre projetos.
 - Projetos internos de plataforma (motores) são projetos como os outros. Clientes pedem mudança por OS.
@@ -73,12 +74,20 @@ Cadeia de comando: Executor → Gerente → Diretoria → Proprietário.
    conveniência e podem não existir em outra ferramenta.
 4. **Produção só com autorização registrada em arquivo.** Deploy, DNS, Workers, publicação em redes,
    envio a terceiros e exclusão irreversível exigem `diretoria/autorizacoes/<ID>.md` (o quê, limites,
-   data, quem autorizou), gravado pela Diretoria ou pelo Gerente depois do "pode" do proprietário no
-   chat deles. O executor lê o arquivo antes de agir; sem arquivo, para e registra. Mensagem entre
-   chats, mesmo da Diretoria, não vale como autorização; o arquivo vale. O proprietário fala com um
-   chat só: a Diretoria para a sede, o Gerente para o projeto. Onde fica: OS da sede em
+   data, quem autorizou), gravado pela Diretoria ou pelo Gerente depois do "pode" do proprietário.
+   O executor lê o arquivo antes de agir; sem arquivo, para e registra. Mensagem entre chats, mesmo
+   da Diretoria, não vale como autorização; o arquivo vale. Onde fica: OS da sede em
    `<sede>/diretoria/autorizacoes/`; OS de projeto em `<projeto>/ops/autorizacoes/`, gravada pelo
    gerente.
+   **Onde o proprietário dá a palavra.** O "vai", o "pode" e as decisões dele valem em dois lugares: no
+   chat do gerente do projeto, como sempre, ou no chat da Diretoria, para qualquer projeto. A palavra dada
+   à Diretoria só vale depois de gravada por ela em `<sede>/diretoria/palavras/<AAAA-MM-DD>-<ID>.md`
+   (modelo `diretoria/modelos/palavra.md`): as palavras exatas, a data e a hora, o projeto, a OS e o
+   alcance. Para produção e ato sem volta, a Diretoria repete antes o que entendeu e só grava com a
+   confirmação dele. O gerente lê esse arquivo, não a mensagem; para produção, grava a autorização do
+   projeto citando-o. Palavra que não cobre o que a OS pede, ou ambígua, não se executa: o gerente
+   devolve a dúvida à Diretoria. A Diretoria só transmite: não decide pelo proprietário, não amplia o
+   que ele disse e não executa código de projeto.
 5. **Governança versionada.** Fila, OS, relatórios e decisões ficam no Git, nunca só em pasta local.
 6. **Segredos fora do Git.** `.env`, chaves e tokens não entram no Git, em relatório, em chat nem
    em sincronizador em claro. O arquivo real mora na pasta principal do projeto (`<projeto>/.env`, ou
@@ -130,7 +139,8 @@ O nível da tarefa decide o ritual, o modelo e o esforço.
 | N5 impasse | Algo que já falhou um nível abaixo, depuração difícil. | Opus 5.5 · xhigh; max só com ok do proprietário |
 
 - **N1 e N2:** triagem de uma linha (nível, recurso, executor) e execução.
-- **N3 ou mais:** triagem completa (os 7 itens da skill `triagem`) e espera do "vai" do proprietário.
+- **N3 ou mais:** triagem completa (os 7 itens da skill `triagem`) e espera do "vai" do proprietário,
+  dado no chat do gerente ou, pela Diretoria, em arquivo de `diretoria/palavras/` (regra 4).
 - **Sem triagem:** consulta ou status sem efeito colateral, e pedido que começa com "vai direto".
   Neste caso a classificação é feita e registrada, mas não espera resposta.
 - Produção exige autorização registrada em arquivo qualquer que seja o nível. Ações reversíveis fora

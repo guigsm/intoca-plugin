@@ -1,15 +1,19 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { encerrarProcessosDe } from './auxiliar-processos.mjs';
 import { aplicar, montarPlano, textoDoPlano, NOME_DA_TAREFA, ROTULO, UNIDADE } from '../lancador/servico.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const SERVICO = join(AQUI, '..', 'lancador', 'servico.mjs');
-const tmp = () => mkdtempSync(join(tmpdir(), 'sala-servico-'));
+const casas = [];
+const tmp = () => (casas.push(mkdtempSync(join(tmpdir(), 'sala-servico-'))), casas[casas.length - 1]);
+// Os testes só rodam a linha de comando do serviço em modo síncrono (`mostrar`); a guarda por PID cobre qualquer filho que sobre.
+after(() => { encerrarProcessosDe({ casa: casas }); });
 const limpar = (...d) => d.forEach((x) => rmSync(x, { recursive: true, force: true }));
 const NODE = '/opt/meu node/bin/node';
 const INICIO = '/pasta com espaço/intoca-sala/sala/lancador/inicio.mjs';

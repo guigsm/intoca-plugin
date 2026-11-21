@@ -4,6 +4,7 @@
 | --- | --- |
 | `os.md` | Ordem de serviço: contrata um executor. |
 | `relatorio.md` | Relatório de entrega: o executor grava ao terminar. |
+| `palavra.md` | Palavra do proprietário dada à Diretoria: ela grava em `diretoria/palavras/` antes de avisar o gerente. |
 | `projeto/README.md` | Como criar um projeto novo a partir de um modelo por tipo. |
 | `projeto/porte.md` | Porte do projeto: quantos chats e quanta cerimônia. |
 | `projeto/<tipo>/` | Carta e esqueleto de `ops/` de cada tipo: site, app, serviço, documento, relatório/BI e operação. |

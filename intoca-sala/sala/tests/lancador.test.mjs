@@ -11,11 +11,14 @@ import {
   arquivoLog, arquivoTentativa, arquivoTrava, decidir, desligado, entradaDaClassica, pegarTrava, sondarSala, vigiar,
 } from '../lancador/lancador.mjs';
 import { arquivoDeEstado, lerEstado } from '../lib/estado.mjs';
+import { guardar, provarSaida, restantes, selecionar } from './auxiliar-processos.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const INICIO = join(AQUI, '..', 'lancador', 'inicio.mjs');
 const tmp = () => mkdtempSync(join(tmpdir(), 'sala-lancador-'));
-const limpar = (...d) => d.forEach((x) => rmSync(x, { recursive: true, force: true }));
+// Com a máquina carregada, um processo que o teste acabou de matar pode ainda estar escrevendo na pasta: o Windows responde
+// ENOTEMPTY. Por isso tenta de novo (o próprio Node repete em ENOTEMPTY/EBUSY com `maxRetries`), em vez de falhar o teste.
+const limpar = (...d) => d.forEach((x) => rmSync(x, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
 const gravarEstado = (casa, obj) => {
   mkdirSync(join(casa, '.intoca'), { recursive: true });
   writeFileSync(arquivoDeEstado(casa), typeof obj === 'string' ? obj : JSON.stringify(obj));
@@ -191,17 +194,21 @@ test('cenário porta ocupada por outro programa: registro velho com pid morto e 
 
 test('cenário porta ocupada, de verdade: INTOCA_SALA_PORTA ocupada faz o server.mjs sair; o lançador registra, não insiste em laço e respeita o cooldown', async () => {
   const casa = tmp();
+  const guarda = guardar({ casa, raizes: [process.pid] }); // a sala que o vigia lança é filha deste processo
   const ocupante = createServer();
   const porta = await new Promise((resolve) => ocupante.listen(0, '127.0.0.1', () => resolve(ocupante.address().port)));
   const env = { ...process.env, INTOCA_HOME: casa, INTOCA_SALA_PORTA: String(porta) };
-  const r1 = await vigiar({ casa, env, prazoMs: 60_000, deps: { intervaloMs: 200 } });
-  assert.equal(r1, 'saiu-cedo');
-  assert.match(readFileSync(arquivoLog(casa), 'utf8'), /saiu antes de abrir a porta/);
-  assert.match(readFileSync(join(casa, '.intoca', 'sala.log'), 'utf8'), /já está em uso/);
-  const r2 = await vigiar({ casa, env, prazoMs: 60_000, deps: { intervaloMs: 200 } });
-  assert.equal(r2, 'cooldown', 'a segunda chamada logo em seguida não relança');
-  await new Promise((r) => ocupante.close(r));
-  limpar(casa);
+  try {
+    const r1 = await vigiar({ casa, env, prazoMs: 60_000, deps: { intervaloMs: 200 } });
+    assert.equal(r1, 'saiu-cedo');
+    assert.match(readFileSync(arquivoLog(casa), 'utf8'), /saiu antes de abrir a porta/);
+    assert.match(readFileSync(join(casa, '.intoca', 'sala.log'), 'utf8'), /já está em uso/);
+    const r2 = await vigiar({ casa, env, prazoMs: 60_000, deps: { intervaloMs: 200 } });
+    assert.equal(r2, 'cooldown', 'a segunda chamada logo em seguida não relança');
+  } finally {
+    await new Promise((r) => ocupante.close(r));
+    try { guarda.encerrar(); } finally { limpar(casa); } // por PID, mesmo se uma asserção acima falhar; a pasta some mesmo se a limpeza lançar
+  }
 });
 
 // ---------- cenário 5: arquivo de estado corrompido ----------
@@ -315,27 +322,89 @@ test('hook de ponta a ponta: sai com 0 e sem saída na hora, e o vigia solto sob
   const casa = tmp();
   const porta = await portaLivre();
   const env = { ...process.env, INTOCA_HOME: casa, INTOCA_SALA_PORTA: String(porta), INTOCA_SEDE: '' };
-  const t0 = Date.now();
-  const hook = spawnSync(process.execPath, [INICIO], { env, input: '{"hook_event_name":"SessionStart","source":"startup"}', encoding: 'utf8', timeout: 15000 });
-  assert.equal(hook.status, 0);
-  assert.equal(hook.stdout, '');
-  assert.equal(hook.stderr, '');
-  assert.ok(Date.now() - t0 < 10000, 'o hook não espera a sala subir');
+  const guarda = guardar({ casa }); // o vigia e a sala sobem soltos: o PID do hook é a raiz para achá-los
   let pid = null;
   try {
+    const t0 = Date.now();
+    const hook = spawnSync(process.execPath, [INICIO], { env, input: '{"hook_event_name":"SessionStart","source":"startup"}', encoding: 'utf8', timeout: 15000 });
+    const ate = Date.now();
+    guarda.raiz(hook.pid, { saiu: true, de: t0, ate }); // `ate` tomado na saída do hook, antes de qualquer coisa // spawnSync: o hook já saiu, o PID pode ser reaproveitado
+    assert.equal(hook.status, 0);
+    assert.equal(hook.stdout, '');
+    assert.equal(hook.stderr, '');
+    assert.ok(Date.now() - t0 < 10000, 'o hook não espera a sala subir');
     assert.ok(await esperarAte(() => entradaDaClassica(casa)?.porta === porta, 60000), 'a sala se registrou');
     pid = entradaDaClassica(casa).pid;
+    // A sala se registra antes de responder: espera a resposta (condição, com teto), não a afirma de imediato.
+    await esperarAte(async () => (await get(porta, '/api/saude')) === 200, 30000);
     assert.equal(await get(porta, '/api/saude'), 200);
+    const t1 = Date.now();
     const hook2 = spawnSync(process.execPath, [INICIO], { env, input: '{}', encoding: 'utf8', timeout: 15000 });
+    const ate2 = Date.now();
+    guarda.raiz(hook2.pid, { saiu: true, de: t1, ate: ate2 });
     assert.equal(hook2.status, 0);
+    // O vigia do segundo hook não deixa marca quando a sala já está no ar, e a trava pode ainda não ter sido pega: por isso um
+    // piso de tempo (o mesmo de antes, 3 s) dá ao vigia a chance de rodar; a espera por condição vem depois, com teto.
+    // Sem o piso, a trava ainda não pega já pareceria "solta" e as asserções passariam antes do vigia agir.
     await new Promise((r) => setTimeout(r, 3000));
+    // Se a trava nunca soltar, esperarAte devolve false e a asserção 'trava solta' abaixo ainda falha.
+    await esperarAte(() => !existsSync(arquivoTrava(casa)), 20000);
     assert.equal(entradaDaClassica(casa).pid, pid, 'a mesma sala; nenhuma outra foi lançada');
     assert.equal(existsSync(arquivoTrava(casa)), false, 'trava solta');
   } finally {
-    if (pid) try { process.kill(pid); } catch { /* já saiu */ }
-    await new Promise((r) => setTimeout(r, 500));
-    limpar(casa);
+    // Encerra por PID tudo que subiu (sala e vigias), esperando sair antes de apagar a casa (ENOTEMPTY com carga). Vale também
+    // quando o teste falha antes de ler o pid da sala.
+    try { guarda.encerrar(); } finally { limpar(casa); }
   }
+  // Prova independente (INT-24), sem `selecionar` nem `restantes`: a porta da sala deixa de responder e o PID registrado some.
+  const prova = await provarSaida({ porta, pids: [pid] });
+  assert.equal(prova.portaRecusada, true, 'a porta da sala recusa conexão depois da limpeza');
+  assert.deepEqual(prova.pidsVivos, [], 'o PID registrado pela sala já não existe');
+});
+
+test('prova INT-23: o teste que falha antes de ler o pid da sala não deixa sala nem vigia vivos', async () => {
+  const casa = tmp();
+  const porta = await portaLivre();
+  const env = { ...process.env, INTOCA_HOME: casa, INTOCA_SALA_PORTA: String(porta), INTOCA_SEDE: '' };
+  const guarda = guardar({ casa });
+  let sala = [];
+  try {
+    const antes = Date.now();
+    const hook = spawnSync(process.execPath, [INICIO], { env, input: '{"hook_event_name":"SessionStart","source":"startup"}', encoding: 'utf8', timeout: 15000 });
+    const ate = Date.now();
+    guarda.raiz(hook.pid, { saiu: true, de: antes, ate });
+    // Espera (com teto) a sala responder, sem listar processos a cada volta (cada listagem é um PowerShell); depois uma só
+    // listagem acha a sala. Falha de propósito logo em seguida, sem ler `entradaDaClassica(casa).pid`.
+    await esperarAte(async () => (await get(porta, '/api/saude')) === 200, 60000);
+    sala = restantes(guarda.opcoes).filter((p) => /server\.mjs/.test(p.cmd));
+    assert.ok(sala.length > 0, 'a sala chegou a subir (senão a prova não prova nada)');
+    await assert.rejects(async () => { assert.fail('falha de propósito, antes de ler o pid'); }, /falha de propósito/);
+  } finally {
+    let encerrados;
+    try { encerrados = guarda.encerrar(); } finally { limpar(casa); } // a pasta some mesmo se a limpeza lançar; só volta depois de uma listagem sem nenhum processo do teste; lança se sobrar algum
+    assert.ok(sala.every((p) => encerrados.includes(p.pid)), 'a sala achada foi encerrada por PID');
+    // Prova independente (INT-24), sem `selecionar` nem `restantes`: a porta deixa de responder e os PIDs já não existem.
+    const prova = await provarSaida({ porta, pids: sala.map((p) => p.pid) });
+    assert.equal(prova.portaRecusada, true, 'a porta da sala recusa conexão');
+    assert.deepEqual(prova.pidsVivos, [], 'nenhum PID da sala sobrou');
+  }
+});
+
+test('auxiliar de processos: seleciona só o que é do teste (casa na linha, descendente do hook, pid da casa) e poupa o resto', () => {
+  const casa = join(tmpdir(), 'sala-lancador-AbC123');
+  const t0 = 1_000_000;
+  const lista = [
+    { pid: 10, ppid: 1, criado: t0 - 5000, cmd: 'C:/node/node.exe C:/sede/sala/server.mjs' }, // a Clássica real: não é filha de nada nosso
+    { pid: 20, ppid: 999, criado: t0 + 10, cmd: 'node C:/x/sala/lancador/inicio.mjs --vigia' }, // vigia solto: filho do hook 999 (já saiu)
+    { pid: 21, ppid: 20, criado: t0 + 20, cmd: 'node C:/x/sala/server.mjs' }, // sala: neta do hook
+    { pid: 22, ppid: 20, criado: t0 + 30, cmd: 'conhost.exe --headless' }, // filho que não é alvo
+    { pid: 30, ppid: 1, criado: t0 + 40, cmd: `node qualquer.js ${casa}` }, // casa na linha
+    { pid: 40, ppid: 999, criado: t0 - 9000, cmd: 'node C:/x/sala/server.mjs' }, // mais velho que o teste (pid de pai reaproveitado)
+    { pid: 50, ppid: 1, criado: t0 + 50, cmd: 'node outra-coisa.js' }, // node genérico: nunca
+  ];
+  const r = selecionar(lista, { casa, raizes: [999], desde: t0, proprio: 5 }).map((p) => p.pid).sort((a, b) => a - b);
+  assert.deepEqual(r, [20, 21, 30]);
+  assert.deepEqual(selecionar(lista, { casa: null, raizes: [], desde: t0, proprio: 5 }), [], 'sem casa nem raiz não escolhe nada');
 });
 
 test('hook em ambiente quebrado (casa inexistente e relativa, estado ilegível, lançador desligado) sai com 0, sem saída e sem criar nada', () => {

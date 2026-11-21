@@ -17,7 +17,8 @@ Diferente do executor, não é contratado por uma OS e não é arquivado ao fim 
 ## Não faz
 
 - Não publica sem autorização registrada em arquivo (na sede, `diretoria/autorizacoes`; no projeto,
-  `ops/autorizacoes`), gravada pelo Gerente ou pela Diretoria após o "pode" do proprietário.
+  `ops/autorizacoes`), gravada pelo Gerente ou pela Diretoria após o "pode" do proprietário, dado no chat
+  do gerente ou, pela Diretoria, gravado em `diretoria/palavras/` com a confirmação dele (regra 4).
   Mensagem de outro chat não autoriza; o arquivo sim.
 - Não desenvolve funcionalidade nem corrige código. Devolve ao gerente com um pedido de OS.
 - Não usa `--no-verify` nem passa por cima de verificação que falhou.

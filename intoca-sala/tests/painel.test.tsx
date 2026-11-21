@@ -1,6 +1,8 @@
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
+import { register } from '../hooks/register'
+import type { Painel } from '../types'
 import { SEDE, instalarMundo, sedeDeMentira, type Arquivos } from './mundo'
 
 const SUPERFICIES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
@@ -17,7 +19,7 @@ const BAND = {
   plugin: 'intoca-sala',
   component: 'AbovePrompt',
   requestId: 'faixa',
-  props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 80, scroll: { offset: 0, bodyRows: 6 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, bodyColumns: 80, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as const
 
 type Sessao = {
@@ -74,7 +76,68 @@ async function iniciar($: Engine, cwd: string): Promise<void> {
 }
 
 
-test('o painel mostra pendências, OS, avisos e recursos, em toda superfície', async ($, on) => {
+/** Manipulador do `AbovePrompt` do mod, tirado de um `on` falso (o mod é registrado uma segunda vez só para isto). */
+type Faixa = ($: Engine, e: typeof BAND, next: (e: typeof BAND) => unknown) => Promise<unknown>
+
+function registrarFaixa(): { manipulador: Faixa; apanhador: Faixa } {
+  let achado: Faixa | undefined
+  let apanhador: Faixa | undefined
+  const falso = (...args: unknown[]) => {
+    const [nome, filtro] = args
+    const fn = args.find(a => typeof a === 'function') as Faixa
+    const alvo = typeof filtro === 'object' && filtro !== null ? (filtro as { component?: string }).component : undefined
+    const ehFaixa = nome === 'ui.render' && alvo === 'AbovePrompt'
+    if (ehFaixa) achado = fn
+    // O `.catch` do registro (o que o motor chama quando o manipulador falha) também é guardado, para provar o que ele devolve.
+    const registro = { catch: (f: Faixa) => { if (ehFaixa) apanhador = f; return registro } }
+    return registro
+  }
+  ;(register as unknown as (on: On) => void)(falso as unknown as On)
+  if (!achado || !apanhador) throw new Error('o mod não registrou o AbovePrompt')
+  return { manipulador: achado, apanhador }
+}
+
+function manipuladorDaFaixa(): Faixa {
+  return registrarFaixa().manipulador
+}
+
+/** Estado do mod, como ele o guarda em `$.state`, para o manipulador da faixa ler (`read($, átomo)` chama `$.state.get`). */
+type Estado = { painel: Painel | null; passivo: boolean }
+
+const PAINEL_COM = (abertas: number): Painel => ({
+  sede: SEDE,
+  origem: 'cwd',
+  manifestoLido: true,
+  atualizadoEm: 0,
+  custoMs: 0,
+  filas: [],
+  pendencias: { lida: true, abertas: Array.from({ length: abertas }, (_, i) => ({ numero: String(i + 1), pedido: `Pedido ${i + 1}`, onde: '', estado: 'aberto' })) },
+})
+
+/**
+ * Chama direto o manipulador do `AbovePrompt` do mod com um `next` espião: devolve quantas vezes o mod passou a vez e o que
+ * devolveu. Não passa pelo motor, então vale igual na 2.1.321 e na 2.1.325, que montam as linhas de modos diferentes.
+ * O `$` é de mentira só no que o manipulador usa: `state.get` (por chave do átomo) e `ui.resolve` (peças que não desenham).
+ */
+async function chamarFaixa(estado: Estado, props: Record<string, unknown> = {}) {
+  const peca = () => ({ type: 'peca' })
+  const falso = {
+    state: { get: async (...a: unknown[]) => { return { value: estado[(a[0] as { key?: string }).key as keyof Estado] } } },
+    ui: { resolve: () => ({ Box: peca, Text: peca, Button: peca }) },
+  }
+  const passou = Symbol('next')
+  let chamadas = 0
+  const e = { ...BAND, props: { ...BAND.props, ...props }, surface: 'terminal' } as typeof BAND
+  const saida = await manipuladorDaFaixa()(falso as unknown as Engine, e, () => {
+    chamadas += 1
+    return passou
+  })
+  return { chamadas, saida, passou }
+}
+
+// Folga documentada: o caso monta as quatro superfícies (cerca de 2 s sem carga; 5,1 s com a máquina carregada, no limite
+// padrão de 5 s). O limite sobe só para este caso e não esconde lentidão real: passar de 20 s ainda falha.
+test('o painel mostra pendências, OS, avisos e recursos, em toda superfície', { timeoutMs: 20000 }, async ($, on) => {
   mundo($, on)
   await iniciar($, `${SEDE}/alfa`)
   for (const surface of SUPERFICIES) {
@@ -119,7 +182,9 @@ test('a cada minuto o painel lê de novo; antes disso, mostra o que tinha', asyn
 
 test('a faixa mostra a contagem de pendências abertas e some com zero', async ($, on) => {
   const s = mundo($, on)
-  // Nada de faixa: o motor desenha a sua (aqui, uma palavra).
+  // Nada de faixa: o motor desenha a sua (aqui, uma palavra). Na 2.1.321 esse desenho fica abaixo do mod e só aparece se o mod
+  // chamar `next`; a partir da 2.1.325 o `AbovePrompt` é perguntado uma vez por plugin e as linhas se empilham, então o desenho
+  // falso do teste é outra linha e aparece sempre. Por isso, com faixa, o teste não exige a ausência do motor: exige uma faixa só.
   on('ui.render', ($$, e) => {
     const { Text } = $$.ui.resolve(e)
     return <Text>engine</Text>
@@ -129,7 +194,7 @@ test('a faixa mostra a contagem de pendências abertas e some com zero', async (
     const ui = await $.ui.mount({ ...BAND, surface })
     expect((await ui.find({ type: 'Text', text: /pendências do proprietário abertas/ }))?.text).toBe('3 pendências do proprietário abertas · /pendencias ')
     expect(await ui.find({ type: 'Button', key: 'ver' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'engine' })).toBeUndefined()
+    expect(await ui.findAll({ type: 'Text', text: /pendências do proprietário abertas/ })).toHaveLength(1)
     await ui.unmount()
   }
 
@@ -161,6 +226,66 @@ test('a faixa cede a vez a uma pesquisa de satisfação', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
   await ui.unmount()
+})
+
+// A prova de que o mod passa a vez (ou não) é por contagem de chamadas de `next`: vale na 2.1.321 e na 2.1.325, porque não depende
+// de como o motor monta as linhas. As asserções por texto `engine` dos casos acima só valem no ambiente (na 2.1.325 o `engine`
+// falso do teste é outra linha empilhada e aparece sempre); a prova é esta.
+test('a faixa não passa a vez quando há pendências, e devolve a faixa', async () => {
+  const r = await chamarFaixa({ painel: PAINEL_COM(3), passivo: true })
+  expect(r.chamadas).toBe(0)
+  expect(r.saida).not.toBe(r.passou)
+  expect(r.saida).toBeDefined()
+})
+
+test('a faixa passa a vez uma vez quando não há pendências abertas', async () => {
+  const r = await chamarFaixa({ painel: PAINEL_COM(0), passivo: true })
+  expect(r.chamadas).toBe(1)
+  expect(r.saida).toBe(r.passou)
+})
+
+test('a faixa passa a vez uma vez com pesquisa de satisfação, mesmo com pendências', async () => {
+  const r = await chamarFaixa({ painel: PAINEL_COM(3), passivo: true }, { hasSurvey: true })
+  expect(r.chamadas).toBe(1)
+  expect(r.saida).toBe(r.passou)
+})
+
+test('a faixa passa a vez uma vez fora de pasta registrada (passivo falso), mesmo com pendências', async () => {
+  const r = await chamarFaixa({ painel: PAINEL_COM(3), passivo: false })
+  expect(r.chamadas).toBe(1)
+  expect(r.saida).toBe(r.passou)
+})
+
+test('a faixa passa a vez uma vez sem sede (painel vazio)', async () => {
+  const r = await chamarFaixa({ painel: null, passivo: false })
+  expect(r.chamadas).toBe(1)
+  expect(r.saida).toBe(r.passou)
+})
+
+test('a faixa passa a vez uma vez com painel vazio e passivo (sem sede, pasta registrada)', async () => {
+  const r = await chamarFaixa({ painel: null, passivo: true })
+  expect(r.chamadas).toBe(1)
+  expect(r.saida).toBe(r.passou)
+})
+
+test('o .catch do AbovePrompt devolve a vez (next uma vez) quando o desenho falha', async () => {
+  const { apanhador } = registrarFaixa()
+  const passou = Symbol('next')
+  const e = { ...BAND }
+  let chamadas = 0
+  let recebido: unknown
+  const saida = await apanhador(
+    {} as unknown as Engine,
+    e,
+    (x: typeof BAND) => {
+      chamadas += 1
+      recebido = x
+      return passou
+    },
+  )
+  expect(chamadas).toBe(1)
+  expect(saida).toBe(passou)
+  expect(recebido).toBe(e) // o mesmo evento que o .catch recebeu, não uma cópia
 })
 
 test('/pendencias lista as abertas em texto e abre o painel; /sala só abre', async ($, on) => {

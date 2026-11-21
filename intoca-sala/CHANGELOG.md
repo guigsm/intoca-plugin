@@ -3,6 +3,17 @@
 Todas as mudanças notáveis deste pacote ficam aqui. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.4.7] - 2026-11-21
+
+### Alterado
+- Só testes; nenhum comportamento do pacote mudou. Os testes do lançador e do serviço passam a encerrar, por PID, a sala e o vigia que
+  subirem (mesmo quando o teste falha), para não deixar processo órfão, e têm folga para máquina lenta (limpeza de pasta com novas
+  tentativas, esperas por condição com teto e um limite maior no caso das quatro superfícies do painel).
+- Novo auxiliar de processos dos testes: encerra por PID só o que é do teste, com filtros de fronteira (pasta de casa na linha de comando,
+  descendência do hook, PID registrado pela casa, idade do processo), poupa a Clássica real e falha alto se sobrar processo.
+- O teste da faixa do mod vale na 2.1.321 e na 2.1.325 do Claude Code, e prova por contagem de chamadas que o mod passa a vez quando
+  não há faixa (sem pendências, com pesquisa de satisfação, fora de pasta registrada ou sem sede) e não passa quando há.
+
 ## [0.4.6] - 2026-11-09
 
 ### Alterado

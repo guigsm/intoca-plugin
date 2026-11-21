@@ -1,4 +1,4 @@
-# InToca Sala (pacote `intoca-sala`, versão 0.4.6)
+# InToca Sala (pacote `intoca-sala`, versão 0.4.7)
 
 O **InToca Sala** é o quadro de avisos do escritório: a faixa e o painel dentro do app (este mod) e a página das Tocas no navegador (a sala Clássica). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Vem do mesmo catálogo do plugin InToca Sede (`intoca`), que o instala junto no `/intoca:comecar`, com o "sim" da pessoa.
 

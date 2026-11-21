@@ -26,6 +26,11 @@
 //    data no lugar do número, duas siglas no nome) fica mudo. Sai só como additionalContext, que o app entrega junto
 //    do resultado da ferramenta (a gravação pode já ter ocorrido): o texto manda regravar ou mover.
 //    INTOCA_SEM_REDIRECIONAR=1 também desliga esta parte.
+// 1d. Avisar documento no `Read` (PLG-43): `Read` de pdf, docx, pptx, xlsx, xls, msg ou epub, com o `markitdown` na máquina (variável
+//    INTOCA_MARKITDOWN ou PATH), ganha um aviso de uma frase (additionalContext) para converter antes e ler só o trecho. Só avisa:
+//    nunca nega, pergunta, troca a leitura nem roda a ferramenta; sem a ferramenta, fica mudo. A regra do `.env` vem antes. Também
+//    fica mudo em caminho de segredo (a lista do `Read`), dentro de qualquer pasta `.out` e na heurística de nome: o aviso manda copiar
+//    para o temporário. Decide pelo texto do caminho, sem tocar o disco do arquivo lido (rede e unidade mapeada podem demorar).
 // Fora disso (e fora das partes acima) a chamada passa sem decisão (saída vazia). Não grava nada, não usa rede e não roda outro programa;
 // lê o sede.yaml e, só no `git push`, as refs do repositório (para saber o que o nome do branch é).
 // Nunca derruba o chat: qualquer erro interno termina em exit 0 sem saída (nunca "allow" por engano).
@@ -36,6 +41,7 @@ import {
   ehNomeDeEnv, ehModeloDeEnv, ehEnvDeSegredo, semSufixoDeModelo,
   forma, dentroDe, donoPorPasta, donoDaWorktree, pastaDeWorktree, montarContexto, variavelLigada, mesmoCaminho,
   acharSede, nomeComparavel, nivelDeRigor, pedacosDe, juntar, marcadorDeWorktree, projetoNaWorktreeDaSede,
+  EXTENSOES_DE_DOCUMENTO, VARIAVEL_DO_MARKITDOWN, markitdownDisponivel,
 } from './lib.mjs';
 import { comandoMexeEmEnv } from './shell-env.mjs';
 
@@ -712,6 +718,62 @@ function autorizacaoDeProjetoNoLugarErrado(entrada) {
   }
 }
 
+// ================================================================ documento no Read (PLG-43)
+
+// Aviso (nunca decisão) de `Read` em documento (pdf, docx, pptx, xlsx, xls, msg, epub): converter com o `markitdown`
+// gasta menos token do que abrir o arquivo cru. Só avisa quando a ferramenta existe nesta máquina (lib:
+// `markitdownDisponivel`); sem ela, cala. Não troca a leitura, não pergunta, não nega e não roda a ferramenta. Sai em toda
+// leitura de documento (o hook não grava estado, então não há "uma vez por sessão"). O texto não repete o nome do
+// arquivo nem o valor da variável: só o nome da variável e o comando genérico. Qualquer erro vira null.
+const AVISO_DE_DOCUMENTO = 'Aviso InToca: este arquivo é um documento. Converta antes com o `markitdown` (o executável indicado em '
+  + `${VARIAVEL_DO_MARKITDOWN}, ou \`markitdown\` no PATH), com \`-o\` para um .md numa pasta temporária fora do repositório, e leia só o trecho `
+  + 'que interessa (Read com offset e limit, ou Grep). PDF escaneado ou documento cujo layout importa: leia como está. '
+  + 'Detalhes: docs/leitura-de-documentos.md do plugin intoca.';
+
+// O aviso manda copiar o documento convertido para uma pasta temporária: por isso CALA quando o caminho é de segredo ou de saída
+// de projeto, que não se copia. Cala (nunca decide nada; a leitura segue como a main a trataria) em: (1) caminho que a lista de
+// segredo do hook (`caminhoDeSegredo`, a mesma que tira o "allow" do `Read`) pega; (2) qualquer pasta `.out` no caminho (da sede ou
+// de projeto, qualquer caixa e barra); (3) só para o aviso, e na dúvida (heurística de nome, não é regra de segredo): palavra inteira
+// `segredo`, `senha`, `chave`, `secret`, `password`, `passwd`, `apikey` ou `keys` (com ou sem plural, entre separadores: início, fim, ponto,
+// hífen, sublinhado, espaço, barra) em qualquer pasta ou no nome, e extensão de chave (`.pem`, `.key`, `.pfx`, `.p12`, `.ppk`, `.jks`,
+// `.keystore`, `.kdbx`) no meio do nome. Decide SÓ PELO TEXTO, em duas formas: o caminho como veio e o resolvido contra o cwd (`path.resolve`,
+// que não toca o disco). NÃO resolve link, junção, nome curto 8.3 nem unidade mapeada, e não chama `realpath`, `stat` nem `exists`: olhar o
+// disco num caminho de rede (`\\servidor\...`) ou numa unidade mapeada pode esperar a rede além dos 5 s do hook. Limite dito: um link ou uma junção
+// para dentro de `.out`, ou o nome curto de um arquivo de segredo, não é visto. Qualquer erro: cala.
+const NOME_DUVIDOSO = /(?:^|[^a-z0-9])(?:segredos?|senhas?|chaves?|secrets?|passwords?|passwd|api[-_ ]?keys?|keys)(?:[^a-z0-9]|$)/;
+const EXTENSAO_DE_CHAVE = /\.(?:pem|key|pfx|p12|ppk|jks|keystore|kdbx)(?:\.|$)/;
+function caminhoNaoSeConverte(entrada, caminho) {
+  try {
+    const formas = [caminho, resolve(String(entrada.cwd || process.cwd()), caminho)];
+    for (const forma of formas) {
+      if (caminhoDeSegredo(forma)) return true;
+      const partes = forma.split(/[\\/]+/).filter(Boolean).map((p) => p.toLowerCase().split(':')[0].replace(/[. ]+$/, ''));
+      if (partes.includes('.out') || partes.some((p) => NOME_DUVIDOSO.test(p)) || EXTENSAO_DE_CHAVE.test(partes.at(-1) ?? '')) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function avisoDeDocumento(entrada) {
+  try {
+    if (entrada.tool_name !== 'Read') return null;
+    const caminho = entrada.tool_input?.file_path;
+    if (typeof caminho !== 'string' || caminho === '') return null;
+    // Barato primeiro: a extensão (o nome sem o fluxo `:x` do NTFS e, no Windows, sem ponto e espaço no fim).
+    let nome = nomeDoArquivo(caminho).split(':')[0];
+    if (process.platform === 'win32') nome = nome.replace(/[. ]+$/, '');
+    const ponto = nome.lastIndexOf('.');
+    if (ponto <= 0 || !EXTENSOES_DE_DOCUMENTO.has(nome.slice(ponto + 1).toLowerCase())) return null;
+    // A ferramenta primeiro: máquina sem ela não paga mais nada. Depois o caminho, só pelo texto (sem tocar o disco).
+    if (!markitdownDisponivel() || caminhoNaoSeConverte(entrada, caminho)) return null;
+    return AVISO_DE_DOCUMENTO;
+  } catch {
+    return null;
+  }
+}
+
 // `contexto`: aviso que acompanha a decisão (ou vai sozinho, sem decisão, quando `decisao` é null).
 function responder(decisao, motivo, contexto) {
   const saida = { hookEventName: 'PreToolUse' };
@@ -733,7 +795,8 @@ function main() {
   // Pergunta (PLG-21b: remover o env) não leva "allow": a pessoa decide no app.
   // Autorização de OS de projeto na gaveta da sede (PLG-22): só avisa, junto da decisão que já valeria (ask, allow)
   // ou sozinho; nunca nega nem tira nada.
-  const aviso = autorizacaoDeProjetoNoLugarErrado(entrada);
+  // Documento no Read (PLG-43): outro aviso, também só additionalContext; os dois nunca coincidem (um é escrita, o outro leitura).
+  const aviso = autorizacaoDeProjetoNoLugarErrado(entrada) ?? avisoDeDocumento(entrada);
   if (motivo) { responder(motivo.decisao, motivo.motivo, aviso); return; }
   const permitido = autorizar(entrada);
   if (permitido) responder('allow', permitido, aviso);

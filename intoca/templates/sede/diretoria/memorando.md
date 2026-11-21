@@ -51,7 +51,9 @@ em arquivos versionados, nunca só na conversa. Chats começam e terminam; os ar
 
 ## Cargos: quem faz o quê
 
-O proprietário fala com um chat por projeto, o gerente, e com a Diretoria para assuntos da sede.
+O proprietário fala com o gerente de cada projeto ou com a Diretoria, à escolha dele. A Diretoria cuida
+dos assuntos da sede e também recebe a palavra dele ("vai", "pode", decisões) sobre qualquer projeto:
+grava em arquivo, em `diretoria/palavras/`, e repassa ao gerente, que lê o arquivo antes de agir.
 Gerentes não conversam entre si: o que atravessa projetos sobe à Diretoria. Cadeia de comando:
 Executor → Gerente → Diretoria → Proprietário.
 
@@ -80,6 +82,7 @@ Apelidos são aceitos no título de um chat, nunca como nome de cargo.
 | Ordem de serviço | `os/` em `diretoria/` ou `ops/` | Quem contrata | Contrata um executor. |
 | Relatório | `relatorios/` ao lado da OS | O executor | O que mudou, o que foi verificado, pendências. |
 | Autorização | `autorizacoes/` ao lado da OS | Diretoria ou gerente, após o "pode" | Libera produção. Sem arquivo, o executor para. |
+| Palavra do proprietário | `diretoria/palavras/` | Diretoria | O "vai", o "pode" ou a decisão dele, dada à Diretoria, com as palavras exatas e a hora. O gerente lê o arquivo. |
 | Passagem | `diretoria/` na sede; `ops/` no projeto | O chat de cargo que sai | O que o sucessor precisa saber. |
 | Pendências do proprietário | `diretoria/` na sede | Diretoria e gerentes; Secretaria mantém | Tudo o que só o proprietário faz. |
 
@@ -93,7 +96,7 @@ São quinze regras.
 1. Uma pessoa por sala: antes de mexer num recurso, olhe a fila.
 2. Ler é sempre livre.
 3. O que vale está no arquivo; mensagem entre chats não decide nada.
-4. Produção só com assinatura: autorização em arquivo depois do "pode" do dono.
+4. Produção só com assinatura: autorização em arquivo depois do "pode" do dono, dado ao gerente ou, gravado em arquivo, à Diretoria; para produção e ato sem volta, a Diretoria repete antes o que entendeu e só grava com a confirmação dele.
 5. Governança versionada: fila, OS, relatórios e decisões no Git.
 6. Segredos fora do Git. Senhas, chaves e o arquivo `.env` (a ficha com as senhas de um projeto) moram na
    pasta principal do projeto, nunca vão para o Git, para um relatório, para um chat nem para um sincronizador de arquivos sem cifra. A IA entrega o modelo
@@ -120,19 +123,22 @@ São quinze regras.
 | N4 crítico | Arquitetura, segurança, dados, incidente em produção | Triagem completa e o "vai" | O mais capaz, alto |
 | N5 impasse | O que já falhou um nível abaixo | Triagem completa e o "vai" | O mais capaz, máximo só com ok do dono |
 
-"vai" libera uma tarefa de nível 3 ou mais; "pode" libera produção e vira arquivo de autorização.
+"vai" libera uma tarefa de nível 3 ou mais; "pode" libera produção e vira arquivo de autorização. Os dois
+valem ditos ao gerente ou à Diretoria; dito à Diretoria, só depois de gravado em `diretoria/palavras/`.
 Consulta sem efeito colateral não tem triagem; "vai direto" classifica e executa sem esperar.
 
 ## Um pedido do começo ao fim
 
-1. O proprietário pede ao gerente do projeto, no chat dele.
+1. O proprietário pede ao gerente do projeto, no chat dele, ou à Diretoria, que grava o pedido em
+   arquivo e o repassa ao gerente.
 2. O gerente faz a triagem, confere a fila e, se for N3 ou mais, espera o "vai".
 3. O gerente escreve a OS e registra o recurso como ocupado.
 4. O gerente abre o executor por cartão de tarefa, com o modelo do nível; o executor confere o modelo
    e trabalha numa cópia isolada.
 5. O executor entrega: commit, relatório, recurso liberado. Dúvida que muda o rumo: para e registra.
 6. O gerente confere no Git e integra.
-7. Publicar é produção: "pode" do dono, autorização em arquivo, plantão executa.
+7. Publicar é produção: "pode" do dono (ao gerente, ou à Diretoria, que repete o que entendeu e grava com a
+   confirmação dele), autorização em arquivo, plantão executa.
 8. O chat do executor é arquivado com o "pode arquivar". O estado fica nos arquivos.
 
 Pedido que toca outro projeto sobe à Diretoria, que registra no destino certo.

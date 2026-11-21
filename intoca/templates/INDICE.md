@@ -35,6 +35,7 @@ nem pessoa do proprietário da sede de origem.
 | `diretoria/memorando.md` | `diretoria/memorando.md` | `diretoria/memorando.md` | neutralizado | `<nome-da-sede>` |
 | `diretoria/modelos/README.md` | `diretoria/modelos/README.md` | novo | novo | ao usar o modelo |
 | `diretoria/modelos/os.md` | `diretoria/modelos/os.md` | `diretoria/modelos/os.md` | copiado | ao usar o modelo |
+| `diretoria/modelos/palavra.md` | `diretoria/modelos/palavra.md` | `diretoria/modelos/palavra.md` | copiado | ao usar o modelo |
 | `diretoria/modelos/projeto/README.md` | `diretoria/modelos/projeto/README.md` | `diretoria/modelos/projeto/README.md` | neutralizado | ao usar o modelo |
 | `diretoria/modelos/projeto/app/.claude/launch.json.exemplo` | `diretoria/modelos/projeto/app/.claude/launch.json.exemplo` | `diretoria/modelos/projeto/app/.claude/launch.json.exemplo` | copiado | ao usar o modelo |
 | `diretoria/modelos/projeto/app/AGENTS.md` | `diretoria/modelos/projeto/app/AGENTS.md` | `diretoria/modelos/projeto/app/AGENTS.md` | copiado | ao usar o modelo |
@@ -74,6 +75,7 @@ nem pessoa do proprietário da sede de origem.
 | `diretoria/os/README.md` | `diretoria/os/README.md` | novo | novo | - |
 | `diretoria/passagem.md` | `diretoria/passagem.md` | `diretoria/passagem.md` (forma) | novo | `<AAAA-MM-DD>` |
 | `diretoria/pendencias-do-proprietario.md` | `diretoria/pendencias-do-proprietario.md` | `diretoria/pendencias-do-proprietario.md` (forma) | novo | `<AAAA-MM-DD>` |
+| `diretoria/palavras/README.md` | `diretoria/palavras/README.md` | `diretoria/palavras/README.md` | neutralizado | - |
 | `diretoria/relatorios/README.md` | `diretoria/relatorios/README.md` | novo | novo | - |
 | `sede.yaml` | `sede.yaml` | `sede.yaml` (campos, sem valores) | novo | `<nome-da-sede>` |
 

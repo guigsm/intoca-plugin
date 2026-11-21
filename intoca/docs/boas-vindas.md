@@ -6,7 +6,7 @@ com a lista de termos, está no Memorando de Integração (`/intoca:memorando`).
 
 ## Resumo (a primeira mensagem)
 
-Pense num escritório. Você é o dono: decide o que se faz e dá o "pode" de tudo o que sai para o mundo. A
+Pense num escritório. Você é o dono: decide o que se faz e dá o "pode" de tudo o que sai para o mundo e de ato sem volta. A
 **sede** é o escritório, uma pasta no seu computador. Nela trabalham cargos, que são papéis (cada um é um
 chat do Claude): a **Diretoria** cuida do escritório inteiro, um **gerente** cuida de cada projeto, e o
 **executor** é um profissional contratado para uma tarefa só. Todo trabalho passa por papel: o pedido é
@@ -25,10 +25,10 @@ os gerentes e decide conflitos entre projetos. Ela planeja e acompanha, não exe
 
 ## 2. Os cargos
 
-- **Você (proprietário):** decide, prioriza e dá o "pode" de qualquer coisa que saia para o mundo.
+- **Você (proprietário):** decide, prioriza e dá o "pode" de qualquer coisa que saia para o mundo e de ato sem volta.
 - **Diretoria:** o escritório como um todo. Um chat.
 - **Gerente:** um por projeto. Cuida da lista de tarefas, da fila e dos recursos do projeto, e contrata
-  executores. É o chat com quem você fala sobre o projeto.
+  executores. É o chat com quem você fala sobre o projeto (a sua palavra também pode ser dada à Diretoria, que a grava em arquivo e repassa ao gerente).
 - **Executor:** contratado para uma ordem de serviço, entrega e é arquivado.
 - **Plantão:** quem cuida de uma função recorrente que mexe com o mundo de fora, como publicar um site.
 - **Secretaria:** mantém a lista do que só você pode fazer (abrir chats, dar "pode", configurar o app).
@@ -41,9 +41,9 @@ projetos sobe para a Diretoria.
 
 ## 3. O caminho de um pedido
 
-1. Você pede algo ao gerente do projeto.
+1. Você pede algo ao gerente do projeto (ou à Diretoria, que registra o pedido e o repassa).
 2. **Triagem:** o gerente responde, antes de agir, o que entendeu, o tamanho (de N1, mecânico, a N5, impasse),
-   quem faz e o que precisa do seu "vai". Pedido pequeno tem triagem de uma linha e segue.
+   quem faz e o que precisa do seu "vai" (dado ao gerente ou, gravado em arquivo, à Diretoria). Pedido pequeno tem triagem de uma linha e segue.
 3. **Ordem de serviço:** o gerente escreve um arquivo com tudo o que o executor precisa saber e contrata um
    executor (um chat novo).
 4. **Execução:** o executor faz só o que a ordem manda, no recurso que ela indica.
@@ -64,8 +64,11 @@ projetos sobe para a Diretoria.
 ## 5. O que você decide e o que a IA decide sozinha
 
 Você decide: o que fazer e em que ordem, o "vai" das tarefas médias para cima (N3 em diante) e o "pode" de
-qualquer coisa que saia para o mundo (publicar, enviar a terceiros, apagar de forma irreversível). Esse "pode"
-vira um arquivo de autorização assinado por você no chat do gerente ou da Diretoria. A IA decide sozinha o que é
+qualquer coisa que saia para o mundo (publicar, enviar a terceiros, apagar de forma irreversível) e de ato sem volta. Esse "pode"
+vira um arquivo de autorização, gravado depois da sua palavra. Você pode dar essa palavra (e o "vai") ao gerente
+do projeto ou à Diretoria, à sua escolha: a que você der à Diretoria ela grava em `diretoria/palavras/`, com as
+suas palavras exatas e a hora, e só então vale; em produção, ela repete antes o que entendeu e espera a sua
+confirmação. A IA decide sozinha o que é
 rotina e reversível: organizar arquivos, escrever dentro da pasta do projeto, rodar testes, gravar relatórios.
 Dúvida que muda o rumo não é decidida por ninguém além de você: vira pergunta.
 

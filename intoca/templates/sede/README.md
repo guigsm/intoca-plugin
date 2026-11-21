@@ -12,7 +12,7 @@ tem a sua pasta e o seu repositório. Criada em <AAAA-MM-DD> a partir da sede de
 | `CLAUDE.md` | Importa o regimento. Só adaptações do Claude Code. |
 | `WORKSPACE.md` | Mapa curto. O mapa oficial é o `sede.yaml`. |
 | `sede.yaml` | Manifesto: projetos, repositórios, cargos e rotinas. Reconstrói a máquina. |
-| `diretoria/` | Governança: `fila.md`, `os/`, `relatorios/`, `decisoes/`, `autorizacoes/` e `modelos/`. |
+| `diretoria/` | Governança: `fila.md`, `os/`, `relatorios/`, `decisoes/`, `autorizacoes/`, `palavras/` e `modelos/`. |
 | `diretoria/memorando.md` | Memorando de Integração: a leitura de chegada, em linguagem de empresa. |
 
 ## Como um chat novo deve usar esta pasta

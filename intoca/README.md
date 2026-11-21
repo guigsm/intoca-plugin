@@ -1,4 +1,4 @@
-# InToca Sede (plugin `intoca`, versão 1.1.0)
+# InToca Sede (plugin `intoca`, versão 1.2.9)
 
 O **InToca Sede** é a camada Claude da sede InToca, empacotada como plugin do Claude Code (identificador `intoca`, comandos `/intoca:...`). Licença MIT; as mudanças de cada versão estão em [`CHANGELOG.md`](CHANGELOG.md). Traz os cargos e as rotinas do
 regimento como skills, os assistentes de leitura como agentes e os hooks que dão contexto, bloqueiam
@@ -14,9 +14,9 @@ Existe um pacote-irmão **opcional**, a **InToca Sala** (`intoca-sala`): o quadr
 
 | Componente | Itens | Como aparece |
 | --- | --- | --- |
-| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor`, `consultor` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar`, `/intoca:rigor` e `/intoca:consultor`. Claude também as aciona pela descrição. |
-| `scripts/` | `criar-sede.mjs`, `aplicar-rigor.mjs`, `instalar-sala.mjs` | Os scripts que o `/intoca:comecar` chama para criar a sede (ver "Começar: `/intoca:comecar`"), para instalar a InToca Sala (ver "A InToca Sala no começo") e que o `/intoca:comecar` e o `/intoca:rigor` chamam para escrever o arquivo de permissões das pastas (ver "Rigor das permissões"). Não são carregados como componente. |
-| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md`, `politica-de-segredos.md`, `consultor-e-vigia.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
+| `skills/` | `diretoria`, `gerente`, `executor`, `plantao`, `secretaria`, `triagem`, `os-nova`, `relatorio`, `encerrar`, `memorando`, `comecar`, `rigor`, `consultor`, `ambiente` | Comandos `/intoca:<nome>`, por exemplo `/intoca:triagem`, `/intoca:memorando`, `/intoca:comecar`, `/intoca:rigor`, `/intoca:consultor` e `/intoca:ambiente`. Claude também as aciona pela descrição. |
+| `scripts/` | `criar-sede.mjs`, `aplicar-rigor.mjs`, `instalar-sala.mjs`, `ambiente.mjs` | Os scripts que o `/intoca:comecar` chama para criar a sede (ver "Começar: `/intoca:comecar`"), para instalar a InToca Sala (ver "A InToca Sala no começo") e que o `/intoca:comecar` e o `/intoca:rigor` chamam para escrever o arquivo de permissões das pastas (ver "Rigor das permissões"). Não são carregados como componente. |
+| `docs/` | `boas-vindas.md`, `git-e-github.md`, `permissoes.md`, `projetos-existentes.md`, `windows-e-appdata.md`, `ambiente.md`, `politica-de-segredos.md`, `consultor-e-vigia.md`, `leitura-de-documentos.md` | Textos de apoio do `/intoca:comecar` e do `/intoca:rigor` (como tudo funciona; Git e GitHub; permissões e rigor, em linguagem de empresa; e a nota curta sobre o `AppData` virtual do Windows e a pasta temporária dos hooks). Não são carregados como componente. O Memorando de Integração que a skill `memorando` lê é a versão neutra de `templates/sede/diretoria/memorando.md`. |
 | `agents/` | `auditor`, `pesquisador`, `revisor`, `vigia` | Assistentes `intoca:<nome>`, ou `@agent-intoca:revisor` quando chamados à mão. |
 | `hooks/` | `sessao-inicio`, `prompt-os`, `pre-ferramenta`, `parada`, `chat-trocado`, `pasta-errada`, `worktree-criar`, `worktree-remover` | Rodam sozinhos nos eventos abaixo. |
 | `templates/` | `sede/`, `INDICE.md`, `permissoes/` | A sede de partida: a árvore que o `/intoca:comecar` copia para criar uma sede nova (ver "Sede de partida"); e os modelos de `.claude/settings.json` por nível de rigor. Não é carregada como componente. |
@@ -107,6 +107,14 @@ Desde a 0.5.0. O pacote traz dez skills; duas são novas.
   `diretoria/autorizacoes/<ID>.md`; a de OS de projeto, em `<projeto>/ops/autorizacoes/<ID>.md`, gravada
   pelo gerente depois do "pode". As skills `encerrar`, `executor`, `gerente`, `os-nova` e `plantao` citam
   os dois caminhos. Os hooks não mudaram por isso.
+- **A palavra do proprietário também pela Diretoria (1.2.3).** O "vai", o "pode" e as decisões dele valem
+  no chat do gerente do projeto, como sempre, ou no chat da Diretoria, para qualquer projeto. A palavra dada à
+  Diretoria só vale depois de gravada por ela em `diretoria/palavras/<AAAA-MM-DD>-<ID>.md` (modelo
+  `diretoria/modelos/palavra.md`, com as palavras exatas, a data e a hora, o projeto, a OS e o alcance); em
+  produção e ato sem volta, ela repete antes o que entendeu e só grava com a confirmação dele. O gerente lê o
+  arquivo, não a mensagem, e devolve à Diretoria a palavra ambígua ou que não cobre a OS. As skills `diretoria`,
+  `gerente`, `triagem`, `os-nova`, `executor` e `plantao` ensinam isso; a sede nova é criada com `diretoria/palavras/`
+  e o modelo. Os hooks não mudaram.
 - **Vocabulário.** O de empresa, até nos verbos: o chat é **contratado**, **assume o cargo** e, trocado
   por outro, o sucessor é **recontratado** e lê a passagem. O aviso padrão à Diretoria é "assumi o cargo".
   Decisão de 2026-10-14; um teste do grupo `pacote` vigia o pacote inteiro.
@@ -170,6 +178,38 @@ modelo: regras simples sobre o prompt e o manifesto. Sem nada a dizer, o hook n�
   com `node hooks/consultor.mjs estado` e zera com `repetir`, sempre com o "sim".
 - **Assistente `vigia`**: parecer de segurança de uma pasta (`.env` ou chave versionados, modelo com valor, segredo em
   texto, origem pública, permissões largas, inventário), só leitura, sem ler o valor de um `.env`.
+
+## Ambiente do Claude: `/intoca:ambiente` (1.2.0; seguimentos da 1.2.1 à 1.2.8)
+
+O plugin guarda, no Git da sede (repositório privado da pessoa), **o mínimo para refazer o ambiente do Claude** numa máquina nova ou depois de uma
+perda: um arquivo só, `diretoria/ambiente.yaml`, só com nomes (**nenhum valor** de variável ou de cabeçalho; veja em `docs/ambiente.md` o que o código garante e o que a pessoa confere no diff). Nunca digite senha, token ou chave no chat.
+
+- **`/intoca:ambiente registrar`** lê os plugins, os catálogos, os servidores MCP, os hooks de fora de plugin, as permissões (só o modo e a
+  contagem) e as ferramentas (Node, Python, `uv`, `git`, `gh`, `gitleaks`) desta máquina e grava o arquivo. Mostra o que mudou e só grava com o
+  "sim". De `env`, cabeçalho e de todo `nome=valor` só sai o **nome**; o argumento que vem logo depois de uma opção que não seja bandeira conhecida é tratado como o valor dela e vira `<definir>`, mesmo que pareça opção (inclusive a opção de um traço com nome longo, como `-accesskey x`, e a string vazia, só de espaço ou só de caractere invisível); o argumento que contém um caractere que carrega dados sem aparecer (largura zero, caractere de tag, uso privado, controle, seletor de variação...) some por inteiro, sozinho ou colado a uma palavra (o emoji com junção e o texto com marca de direção somem junto: falso positivo aceito); o pacote com versão (`mcp-remote@latest`, `firecrawl-mcp@1.2.3`) fica visível (com números de até 6 dígitos por parte e 8 no sufixo: números maiores e o endereço depois do `-` somem), e o destino `usuario@host` e o `@` parecido (`＠`, `﹫`) somem; URL sem esquema (`//usuario:x@host/db`) e valor em base64 com `=` no fim (`QWxh…==`) também somem; caminho de máquina vira relativo à sede. Antes de gravar, o
+  script varre o próprio texto (o analisador do Vigia, padrões de chave e, se existir, o `gitleaks`): achado = recusa e diz só o nome do campo.
+- **`/intoca:ambiente restaurar`** lê o arquivo, compara com a máquina e mostra o plano na ordem (ferramentas, catálogos, plugins, hooks, MCP).
+  Com um "sim", executa o que dá para refazer sozinho e **para** no primeiro passo que é da pessoa: login, conectores do claude.ai, preencher o
+  `.env` a partir do `.env.example`, tarefas agendadas, confiança de pasta. `--so-plano` só imprime. Só acrescenta (plugin, catálogo, servidor MCP): o que já existe e difere
+  só é mostrado; os hooks da sala animada são a exceção (o instalador regrava o `settings.json`, e o plano avisa antes). O arquivo é tratado como
+  **não confiável**: cada item passa por um padrão estrito (o que não passa fica `recusada` no plano), as ferramentas vêm de uma tabela fixa, servidor
+  MCP de comando local só é mostrado e o plano que roda é o que foi mostrado (`--confirmado --plano=<plano_hash>`).
+- O `scripts/ambiente.mjs` lê a pasta do Claude de `CLAUDE_CONFIG_DIR` (ou `~/.claude`) e só grava o `ambiente.yaml`. O formato e o roteiro da
+  máquina nova estão em [`docs/ambiente.md`](docs/ambiente.md). O `/intoca:comecar` avisa, em uma linha no fim, que ele existe.
+
+## Leitura de documentos com o `markitdown` (1.2.9)
+
+Os chats leem PDF, Word, PowerPoint e planilha gastando menos token quando convertem o arquivo para `.md` antes (com o `markitdown`, `-o` para uma pasta
+temporária fora do repositório) e leem só o trecho que interessa. O texto de apoio é [`docs/leitura-de-documentos.md`](docs/leitura-de-documentos.md): quando usar e
+quando não (PDF escaneado, layout que importa, URL, `.env`), o comando, o que fazer sem a ferramenta e o roteiro de instalar numa máquina nova (passo da pessoa:
+ambiente isolado, versão fixada, só os conversores locais). As skills `gerente`, `executor`, `diretoria` e `secretaria` trazem uma linha apontando para ele.
+
+**O aviso do hook.** No `PreToolUse` do `Read`, em arquivo `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xls`, `.msg` ou `.epub` (maiúscula e minúscula valem igual), **e só se** a
+ferramenta existir na máquina, o `pre-ferramenta` acrescenta uma ou duas frases (`additionalContext`) lembrando de converter antes. A ferramenta é achada pela variável
+`INTOCA_MARKITDOWN` (caminho completo de um executável que existe) ou por um `markitdown` numa pasta absoluta do `PATH`; o hook só olha o disco. **O que o hook faz e não faz:**
+só avisa, em toda leitura de documento (não guarda estado); não bloqueia, não pergunta, não troca a leitura, não converte nada e não roda a ferramenta; sem ela, não diz nada
+e a leitura segue como antes; as regras de negar (`.env`, inclusive `.env.pdf`) vêm antes e seguem valendo. Não precisa de sede, como o lado "negar". O valor da variável
+não entra no aviso nem em arquivo do pacote. Não cobre PDF escaneado (o `markitdown` não faz OCR). O `/intoca:ambiente` não instala nem confere o `markitdown`: é passo seu.
 
 ## Política de segredos: o `.env` fica na pasta do projeto (0.9.0; correções na 0.9.1)
 

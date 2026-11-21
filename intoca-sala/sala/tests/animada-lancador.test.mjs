@@ -8,9 +8,14 @@ import { join } from 'node:path';
 import { arquivoLog, arquivoTravaAnimada, subirAnimada } from '../lancador/lancador.mjs';
 import { rodarHook, rodarServico, rodarVigia } from '../lancador/inicio.mjs';
 import { arquivoDeEstado, lerEstado } from '../lib/estado.mjs';
+import { encerrarProcessosDe } from './auxiliar-processos.mjs';
 
 const casas = [];
-after(() => casas.forEach((c) => rmSync(c, { recursive: true, force: true })));
+// Hoje nada aqui sobe processo de verdade (tudo é injetado); a guarda por PID garante que, se um dia subir, não sobra órfão.
+after(() => {
+  encerrarProcessosDe({ casa: casas });
+  casas.forEach((c) => rmSync(c, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
+});
 const novaCasa = (estado) => {
   const casa = mkdtempSync(join(tmpdir(), 'sala-anim-lanc-'));
   casas.push(casa);

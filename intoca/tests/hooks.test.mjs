@@ -4,6 +4,7 @@
 //       node plugin/intoca/tests/hooks.test.mjs --sequencial        tudo num processo só, em fila
 //       node plugin/intoca/tests/hooks.test.mjs --grupo=<hook>      só os casos de um hook
 //       node plugin/intoca/tests/hooks.test.mjs --grupo=<hook> --fatia=<i>/<n>   uma fatia do grupo
+//       node plugin/intoca/tests/hooks.test.mjs --grupo=<hook> --nome=<trecho>    só os casos do grupo cujo nome contém o trecho (para rodar um caso só)
 // Cada hook roda como processo, com JSON simulado em stdin. Nada toca a sede real: o roteiro cria
 // uma sede de mentira em os.tmpdir() e apaga ao fim. Exit 0 se todos passam, 1 se algum falha.
 //
@@ -21,16 +22,22 @@
 // outros chats) só subir um processo leva mais de 1 s. Estouro nunca é engolido: o caso falha e o
 // detalhe diz qual hook passou do limite.
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, renameSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync } from 'node:fs';
-import { availableParallelism, tmpdir } from 'node:os';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, renameSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, lstatSync, linkSync, symlinkSync } from 'node:fs';
+import { availableParallelism, hostname, tmpdir } from 'node:os';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { interpretarManifesto, TITULOS_PADRAO, regexDoTitulo, padraoDeTituloValido, cargoDoTitulo, nivelDeRigor, LISTAS_DE_SEGREDO, caminhoDeSegredo } from '../hooks/lib.mjs';
+import { interpretarManifesto, TITULOS_PADRAO, regexDoTitulo, padraoDeTituloValido, cargoDoTitulo, nivelDeRigor, LISTAS_DE_SEGREDO, caminhoDeSegredo, markitdownDisponivel } from '../hooks/lib.mjs';
 import { comandoMexeEmEnv } from '../hooks/shell-env.mjs';
 import { pareceSegredo, DICAS, modoDoConsultor, perfilDaPessoa, FRASE_FIXA, textoParaOVigia, dicasParaPrompt } from '../hooks/consultor.mjs';
 import { textoDoProprietario, tirarEnvelopes, citaArquivoDeOs, montarContexto } from '../hooks/lib.mjs';
 import { executar as executarCriar } from '../scripts/criar-sede.mjs';
 import { executar as executarSala } from '../scripts/instalar-sala.mjs';
+import { propriedade as propriedadeDeArgumentos, CONFIG_CADEIA, CONFIG_INDEPENDENTE_PRINCIPAL, CONFIG_INDEPENDENTE_CRITICA, ALFABETO_INDEPENDENTE, ALFABETO_INDEPENDENTE_CRITICO, ALFABETO, ALFABETO_NOMES, ALFABETO_CRITICO, S1 as SENT1_PROP, S3 as S3_PROP, ZW as ZW_PROP, NUL as NUL_PROP, COMUM_PKG, ESCOPO_PKG, DIGEST_PKG, CONFIG_VERSAO, CONFIG_INVISIVEL, ALFABETO_VERSAO, ALFABETO_VERSAO_CADEIA, ALFABETO_INVISIVEL, ALFABETO_INVISIVEL_CADEIA, VERSAO_COM_SEGREDO, LIMITE_DE_VERSAO, PACOTES_COMUNS, INVISIVEIS_NOVOS, INVISIVEIS_ESPACO, COLADO_A_TAG as COLADO_A_TAG_PROP, SEGREDO_COLADO_A_TAG as SEGREDO_COLADO_A_TAG_PROP } from './propriedade-argumentos.mjs';
+import * as TEMPO_MOD from './tempo-argumentos.mjs';
+import { ALFABETO_OPCAO_OCULTA as ALFABETO_OPCAO_OCULTA_PROP } from './propriedade-argumentos.mjs';
+import { diferencial as diferencialDeArgumentos, FICHAS_COMUNS as FICHAS_COMUNS_DIF, COMANDOS as COMANDOS_DIF, EXCECOES as EXCECOES_DIF, FICHAS_NOVAS_1_2_8, EXTRAS_1_2_8, EXCECOES_1_2_8, diferencialDeOpcaoOculta } from './diferencial-argumentos.mjs';
+import { argumentosDoMcp as argumentosDaReferencia126 } from './referencia/ambiente-1.2.6.mjs';
+import { executar as executarAmb, argumentosDoMcp, emitirYaml, lerYaml, varrer as varrerAmb, varrerCaminhos, textoDoAmbiente, acharNoPath, diferencasEntre, PASSOS_DA_PESSOA as PASSOS_DO_SCRIPT } from '../scripts/ambiente.mjs';
 
 const ESTE = fileURLToPath(import.meta.url);
 const HOOKS = join(dirname(ESTE), '..', 'hooks');
@@ -41,6 +48,7 @@ const TEMPO_LIMITE = Number(process.env.INTOCA_TESTE_TEMPO_LIMITE_MS) || 60000;
 const ARGS = process.argv.slice(2);
 const opcao = (nome) => ARGS.find((a) => a.startsWith(`--${nome}=`))?.slice(nome.length + 3);
 const GRUPO = opcao('grupo');
+const NOME_DO_CASO = opcao('nome'); // só os casos cujo nome contém o trecho (uso de quem escreve um caso)
 const FATIA = (opcao('fatia') ?? '').match(/^(\d+)\/(\d+)$/)?.slice(1).map(Number) ?? null; // [i, n]
 const LISTAR = ARGS.includes('--listar');
 const JSON_SAIDA = ARGS.includes('--json'); // saída para o processo pai
@@ -222,7 +230,7 @@ function registrarProblema(r, rotulo) {
     : `${rotulo}: ${r.error.message}`);
 }
 
-function rodar(script, entrada, { env = {}, bruto = false } = {}) {
+function rodar(script, entrada, { env = {}, bruto = false, node = [] } = {}) {
   const limpo = { ...process.env };
   delete limpo.INTOCA_SEDE;
   delete limpo.CLAUDE_PROJECT_DIR;
@@ -230,12 +238,15 @@ function rodar(script, entrada, { env = {}, bruto = false } = {}) {
   delete limpo.INTOCA_SEM_AVISO_TROCADO;
   delete limpo.INTOCA_SEM_AVISO_PASTA;
   delete limpo.INTOCA_SEM_REDIRECIONAR;
+  delete limpo.INTOCA_MARKITDOWN; // a ferramenta de leitura de quem roda o teste nunca decide um caso (PLG-43)
   delete limpo.INTOCA_RIGOR; // o rigor (PLG-14) de quem roda o teste não muda nenhum caso
   limpo.INTOCA_HOME = HOME_VAZIA; // o ponteiro da sede (PLG-03) nunca vem da pasta real de quem roda o teste
   // As fixtures moram em os.tmpdir(), onde o aviso "nenhuma Toca" cala (PLG-03b): o pasta-errada, que não usa o estado
   // em disco, enxerga outra pasta temporária. Os casos do ruído passam a sua por `env`.
   if (script === 'pasta-errada') { limpo.TEMP = TMP_SISTEMA; limpo.TMP = TMP_SISTEMA; limpo.TMPDIR = TMP_SISTEMA; }
-  const r = spawnSync(process.execPath, [join(HOOKS, `${script}.mjs`)], {
+  // No Windows `Path` e `PATH` são a mesma variável: o `env` do caso troca a do ambiente, sem deixar duas (PLG-43).
+  if (process.platform === 'win32') for (const k of Object.keys(env)) for (const k2 of Object.keys(limpo)) if (k2 !== k && k2.toLowerCase() === k.toLowerCase()) delete limpo[k2];
+  const r = spawnSync(process.execPath, [...node, join(HOOKS, `${script}.mjs`)], {
     input: bruto ? entrada : JSON.stringify(entrada),
     encoding: 'utf8',
     env: { ...limpo, ...env },
@@ -263,6 +274,7 @@ function caso(script, nome, fn) {
   indicePorGrupo[script] = idx + 1;
   if (LISTAR) { catalogo.push({ script, nome }); return; }
   if (GRUPO && script !== GRUPO) return;
+  if (NOME_DO_CASO && !nome.includes(NOME_DO_CASO)) return;
   if (FATIA && idx % FATIA[1] !== FATIA[0]) return;
   const t0 = Date.now();
   const problemasAntes = PROBLEMAS.length;
@@ -914,6 +926,293 @@ function espera(r, esperado, rotulo = '') {
 const todos = (...rs) => rs.find((r) => r !== true) ?? true;
 const casoAut = (nome, fn) => caso('autorizacao', nome, fn);
 const juncao = (alvo, link) => symlinkSync(alvo, link, 'junction'); // no Linux e no macOS vira link de pasta
+
+// ------------------------------ documento no Read: aviso do markitdown (1.2.9)
+// Executável de mentira: um arquivo de texto com o nome certo (o hook só olha o disco, nunca roda nada). Nenhum caso depende do
+// `markitdown` de verdade nem da variável de quem roda o teste (o `rodar` a tira do ambiente). O sentinela é montado em pedaços
+// para o literal não existir em arquivo nenhum do pacote (o caso (g) procura por ele).
+const MD_SENTINELA = ['sentinela', 'markitdown', 'xk7'].join('-');
+const MD_BASE = REAL(mkdtempSync(join(raizTeste, 'md-')));
+const MD_VAZIA = join(MD_BASE, 'vazia');
+const MD_BIN = join(MD_BASE, MD_SENTINELA, 'bin');
+const MD_NOME = NO_WINDOWS ? 'markitdown.exe' : 'markitdown';
+const MD_SEP = NO_WINDOWS ? ';' : ':';
+mkdirSync(MD_VAZIA, { recursive: true });
+const falsoMarkitdown = (dir, nome = MD_NOME) => {
+  mkdirSync(dir, { recursive: true });
+  const arquivo = join(dir, nome);
+  writeFileSync(arquivo, 'não é um programa\n');
+  if (!NO_WINDOWS) chmodSync(arquivo, 0o755);
+  return arquivo;
+};
+const MD_EXE = falsoMarkitdown(MD_BIN);
+const MD_COM = { INTOCA_MARKITDOWN: MD_EXE, PATH: MD_VAZIA }; // a variável aponta para o executável; o PATH não tem nada
+const MD_SEM = { PATH: MD_VAZIA }; // sem variável e sem `markitdown` no PATH
+const lerDoc = (arquivo, env, cwd = FORA, ferramenta = 'Read') => aut(cwd, ferramenta, { file_path: arquivo }, env);
+const decisaoDe = (r) => r.json?.hookSpecificOutput?.permissionDecision;
+const AVISO_MD = 'Aviso InToca: este arquivo é um documento.';
+// Avisou, sem negar nem perguntar (a decisão é "allow" da autorização por regra, ou nenhuma).
+const mdAvisou = (r) => (r.status === 0 && r.erro === '' && contexto(r).startsWith(AVISO_MD) && [undefined, 'allow'].includes(decisaoDe(r))
+  ? true : { ok: false, detalhe: `status ${r.status}; decisão ${decisaoDe(r)}; contexto ${contexto(r).slice(0, 80)}; stderr ${r.erro.trim()}` });
+const mdCalou = (r) => (semSaida(r) ? true : { ok: false, detalhe: `esperado saída vazia, veio status ${r.status} e ${JSON.stringify(r.saida).slice(0, 200)}; stderr ${r.erro.trim()}` });
+const casoMd = (nome, fn) => caso('pre-ferramenta', `documento no Read: ${nome}`, fn);
+
+casoMd('(a) Read de .pdf com a variável apontando para um executável: aviso curto, sem negar nem perguntar', () => {
+  const r = lerDoc(join(FORA, 'x', 'a.pdf'), MD_COM);
+  const c = contexto(r);
+  return todos(mdAvisou(r), c.includes('markitdown') && c.includes('-o') && c.includes('PDF escaneado') && c.length < 600 && !c.includes('\n')
+    ? true : { ok: false, detalhe: c });
+});
+casoMd('(a) dentro de uma sede, a leitura segue com "allow" por regra e o aviso junto', () => {
+  const c = cenarioAut();
+  const r = lerDoc(join(c.sede, 'diretoria', 'x.pdf'), MD_COM, c.sede);
+  return todos(espera(r, 'allow'), mdAvisou(r));
+});
+casoMd('(a) a ferramenta achada só pelo PATH (sem a variável) também avisa', () => {
+  const dir = join(MD_BASE, 'so-path');
+  falsoMarkitdown(dir);
+  return mdAvisou(lerDoc(join(FORA, 'a.pdf'), { PATH: [MD_VAZIA, dir].join(MD_SEP) }));
+});
+for (const ext of ['pdf', 'docx', 'pptx', 'xlsx', 'xls', 'msg', 'epub']) {
+  casoMd(`(a) .${ext} avisa`, () => mdAvisou(lerDoc(join(FORA, `a.${ext}`), MD_COM)));
+}
+casoMd('(a) Write e Edit em .pdf não avisam (só a leitura)', () => todos(
+  mdCalou(lerDoc(join(FORA, 'a.pdf'), MD_COM, FORA, 'Write')), mdCalou(lerDoc(join(FORA, 'a.pdf'), MD_COM, FORA, 'Edit'))));
+casoMd('(b) sem a variável e sem `markitdown` no PATH: nenhuma saída', () => todos(
+  mdCalou(lerDoc(join(FORA, 'a.pdf'), MD_SEM)), mdCalou(lerDoc(join(FORA, 'a.docx'), MD_SEM))));
+casoMd('(b) dentro de uma sede, sem a ferramenta: só o "allow" de sempre, sem aviso', () => {
+  const c = cenarioAut();
+  const r = lerDoc(join(c.sede, 'diretoria', 'x.pdf'), MD_SEM, c.sede);
+  return todos(espera(r, 'allow'), contexto(r) === '' ? true : { ok: false, detalhe: contexto(r) });
+});
+for (const nome of ['a.md', 'a.ts', 'a.txt', 'a.html', 'a.htm', 'LEIAME', 'a.pdf.txt', 'a.pdf.md', '.pdf', 'pdf', 'a.pdfx', 'a.json', 'a.csv']) {
+  casoMd(`(c) ${nome} não avisa, mesmo com a ferramenta`, () => mdCalou(lerDoc(join(FORA, 'x', nome), MD_COM)));
+}
+for (const nome of ['A.PDF', 'Contrato Final.PDF', 'relatório ação 2ª via.docx', 'a b  c.XlSx', 'Apresentação São João.pptx']) {
+  casoMd(`(d) ${JSON.stringify(nome)} avisa`, () => mdAvisou(lerDoc(join(FORA, 'pasta com espaço', 'ç', nome), MD_COM)));
+}
+for (const nome of ['.env', '.env.local', '.env.pdf', '.ENV.PDF']) {
+  casoMd(`(e) ${nome} segue negado, sem aviso`, () => {
+    const r = lerDoc(join(FORA, 'x', nome), MD_COM);
+    return negado(r) && contexto(r) === '' ? true : { ok: false, detalhe: r.saida };
+  });
+}
+writeFileSync(join(MD_BASE, 'leia-me.txt'), 'texto\n');
+const mdFalsos = {
+  'arquivo que não existe': join(MD_BASE, 'nao-existe', MD_NOME),
+  'uma pasta': MD_BIN,
+  'texto com espaço e ponto e vírgula': `${MD_EXE} --x; echo feito`,
+  'comando solto, sem caminho': 'markitdown',
+  'caminho relativo': join('relativo', MD_NOME),
+  'texto vazio': '',
+  'arquivo que não tem cara de executável': join(MD_BASE, 'leia-me.txt'),
+};
+for (const [rotulo, valor] of Object.entries(mdFalsos)) {
+  casoMd(`(f) a variável apontando para ${rotulo}: não avisa nem quebra`, () => mdCalou(lerDoc(join(FORA, 'a.pdf'), { INTOCA_MARKITDOWN: valor, PATH: MD_VAZIA })));
+}
+if (!NO_WINDOWS) {
+  casoMd('(f) arquivo sem bit de execução (sistemas que não são Windows): não avisa', () => {
+    const arquivo = falsoMarkitdown(join(MD_BASE, 'sem-bit'), 'sem-bit');
+    chmodSync(arquivo, 0o644);
+    return mdCalou(lerDoc(join(FORA, 'a.pdf'), { INTOCA_MARKITDOWN: arquivo, PATH: MD_VAZIA }));
+  });
+}
+casoMd('(f) pasta vazia ou relativa no PATH não conta, mesmo com o executável na pasta atual', () => {
+  const dir = join(MD_BASE, 'cwd-com-exe');
+  falsoMarkitdown(dir);
+  return mdCalou(lerDoc(join(dir, 'a.pdf'), { PATH: ['', '.', 'relativa'].join(MD_SEP) }, dir));
+});
+casoMd('(g) o valor da variável não aparece na saída do hook', () => {
+  const r = lerDoc(join(FORA, 'a.pdf'), MD_COM);
+  return todos(mdAvisou(r), !r.saida.includes(MD_SENTINELA) && !r.saida.includes(MD_EXE) && !r.erro.includes(MD_SENTINELA)
+    ? true : { ok: false, detalhe: r.saida });
+});
+casoMd('(h) a procura da ferramenta com um PATH grande (300 pastas) leva milissegundos, não segundos (teto de 400 ms para não reprovar em máquina carregada)', () => {
+  const pastas = Array.from({ length: 300 }, (_, i) => join(MD_BASE, 'longe', `p${i}`));
+  const ambiente = { PATH: pastas.join(MD_SEP), Path: pastas.join(MD_SEP) };
+  let melhor = Infinity;
+  let achou = true;
+  for (let k = 0; k < 5; k += 1) {
+    const t0 = performance.now();
+    achou = markitdownDisponivel(ambiente);
+    melhor = Math.min(melhor, performance.now() - t0);
+  }
+  return achou === false && melhor < 400 ? true : { ok: false, detalhe: `achou=${achou}; melhor de 5: ${melhor.toFixed(1)} ms` };
+});
+casoMd('(h) o hook inteiro com o PATH grande segue calado e termina bem', () => {
+  const pastas = Array.from({ length: 300 }, (_, i) => join(MD_BASE, 'longe', `p${i}`));
+  return mdCalou(lerDoc(join(FORA, 'a.pdf'), { PATH: pastas.join(MD_SEP) }));
+});
+// Segredo e `.out` (correção da revisão): o aviso manda copiar para o temporário o que a lista de segredo e a `.out` protegem, então
+// calam. Cada caso roda numa sede, com a ferramenta, e compara com o mesmo `Read` sem a ferramenta (o que a main daria): a saída
+// tem de ser IGUAL (a mesma decisão, e nenhum `additionalContext`).
+const md_SEGREDOS = {
+  '.out da sede (private)': (c) => join(c.sede, '.out', 'private', 'x.pdf'),
+  '.out de projeto (private)': (c) => join(c.proj, '.out', 'private', 'x.pdf'),
+  '.out da sede, fora de private': (c) => join(c.sede, '.OUT', 'x.pdf'),
+  '.out de projeto, fora de private': (c) => join(c.proj, '.out', 'sub', 'x.xlsx'),
+  'credentials.xlsx': (c) => join(c.sede, 'credentials.xlsx'),
+  'id_rsa.pdf': (c) => join(c.sede, 'id_rsa.pdf'),
+  'chave.pem.pdf': (c) => join(c.sede, 'chave.pem.pdf'),
+  'diretoria/segredos.xlsx': (c) => join(c.sede, 'diretoria', 'segredos.xlsx'),
+  '.ssh/x.pdf': (c) => join(c.sede, '.ssh', 'x.pdf'),
+};
+for (const [rotulo, caminhoDe] of Object.entries(md_SEGREDOS)) {
+  casoMd(`(segredo) ${rotulo} com a ferramenta: sem aviso e a mesma saída de sem a ferramenta`, () => {
+    const c = cenarioAut();
+    const arq = caminhoDe(c);
+    const com = lerDoc(arq, MD_COM, c.sede);
+    const sem = lerDoc(arq, MD_SEM, c.sede);
+    return com.status === 0 && com.erro === '' && contexto(com) === '' && com.saida === sem.saida ? true
+      : { ok: false, detalhe: `com: ${com.saida.slice(0, 200)} | sem: ${sem.saida.slice(0, 80)}` };
+  });
+}
+casoMd('(segredo) controle: ops/x.pdf de projeto continua avisando, com o "allow" por regra', () => {
+  const c = cenarioAut();
+  const r = lerDoc(join(c.proj, 'ops', 'x.pdf'), MD_COM, c.sede);
+  return todos(espera(r, 'allow'), mdAvisou(r));
+});
+casoMd('(segredo) caminho relativo para uma pasta `.out` também cala', () => {
+  const c = cenarioAut();
+  const r = lerDoc(join('.out', 'private', 'x.pdf'), MD_COM, c.sede);
+  const sem = lerDoc(join('.out', 'private', 'x.pdf'), MD_SEM, c.sede);
+  return contexto(r) === '' && r.saida === sem.saida ? true : { ok: false, detalhe: r.saida.slice(0, 200) };
+});
+
+// Caminho de rede não conta (correção da revisão): a variável e o PATH apontando para UNC inexistente não avisam, e a procura não
+// espera a rede. Sem rede real: o nome do servidor não existe.
+// Um nome de servidor diferente por caso: o Windows guarda por um tempo que um servidor não responde, e um segundo caso com o mesmo nome seria rápido de qualquer jeito.
+const UNC_FALSOS = ['\\\\servidor-inexistente-xk7a\\x\\markitdown.exe', '//servidor-inexistente-xk7b/x/markitdown.exe', '\\\\?\\UNC\\servidor-inexistente-xk7c\\x\\markitdown.exe'];
+for (const unc of UNC_FALSOS) {
+  casoMd(`(rede) a variável apontando para ${unc} não avisa e a procura é rápida`, () => {
+    const t0 = performance.now();
+    const achou = markitdownDisponivel({ INTOCA_MARKITDOWN: unc, PATH: MD_VAZIA, Path: MD_VAZIA });
+    const ms = performance.now() - t0;
+    return todos(mdCalou(lerDoc(join(FORA, 'a.pdf'), { INTOCA_MARKITDOWN: unc, PATH: MD_VAZIA })),
+      achou === false && ms < 300 ? true : { ok: false, detalhe: `achou=${achou}; ${ms.toFixed(0)} ms` });
+  });
+}
+casoMd('(rede) pasta UNC inexistente no PATH não conta, e o hook responde rápido', () => {
+  const pasta = '\\\\servidor-inexistente-xk7d\\x';
+  const caminho = [MD_VAZIA, pasta, '//servidor-inexistente-xk7e/y'].join(MD_SEP);
+  const t0 = performance.now();
+  const achou = markitdownDisponivel({ PATH: caminho, Path: caminho });
+  const ms = performance.now() - t0;
+  const h0 = performance.now();
+  const r = lerDoc(join(FORA, 'a.pdf'), { PATH: caminho });
+  const hms = performance.now() - h0;
+  return todos(mdCalou(r), achou === false && ms < 300 && hms < 2500 ? true : { ok: false, detalhe: `achou=${achou}; lib ${ms.toFixed(0)} ms; hook ${hms.toFixed(0)} ms` });
+});
+
+// Isca que roda de verdade: no Windows um `.cmd`, nos outros sistemas um script com o bit de execução. Ela grava um arquivo-prova.
+// Controle: executada à mão, o arquivo aparece (a isca funciona). O hook, com a variável apontando para ela, avisa e NÃO a executa.
+casoMd('o hook nunca roda a ferramenta: uma isca que roda de verdade e grava um arquivo só o grava quando executada à mão', () => {
+  const marca = join(MD_BASE, 'rodou.txt');
+  const dir = join(MD_BASE, 'isca');
+  mkdirSync(dir, { recursive: true });
+  const exe = join(dir, NO_WINDOWS ? 'markitdown.cmd' : 'markitdown');
+  writeFileSync(exe, NO_WINDOWS ? `@echo off\r\necho rodou> "${marca}"\r\n` : `#!/bin/sh\necho rodou > ${JSON.stringify(marca)}\n`);
+  if (!NO_WINDOWS) chmodSync(exe, 0o755);
+  // Controle: a isca roda de verdade quando chamada à mão (`cmd /d /c` no Windows, o próprio script nos outros sistemas). O teste REPROVA se
+  // o spawn do controle falhar (erro, status diferente de 0, ou sem o arquivo-prova): nada passa em silêncio. O que o caso prova: (1) a isca é
+  // executável de fato; (2) o hook, com a variável apontando para ela e só com o PATH, avisa e NÃO a executa (o arquivo-prova não reaparece).
+  const mao = NO_WINDOWS ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', exe], { encoding: 'utf8', timeout: 20000 })
+    : spawnSync(exe, [], { encoding: 'utf8', timeout: 20000 });
+  if (mao.error || mao.status !== 0 || !existsSync(marca)) {
+    return { ok: false, detalhe: `o controle falhou, o teste não prova nada: erro ${mao.error?.message ?? 'nenhum'}; status ${mao.status}; arquivo-prova ${existsSync(marca)}` };
+  }
+  rmSync(marca);
+  const r = lerDoc(join(FORA, 'a.pdf'), { INTOCA_MARKITDOWN: exe, PATH: MD_VAZIA });
+  const r2 = lerDoc(join(FORA, 'a.pdf'), { PATH: dir });
+  return todos(mdAvisou(r), mdAvisou(r2), existsSync(marca) ? { ok: false, detalhe: 'o hook executou a ferramenta' } : true);
+});
+
+// Espião de disco (correção da revisão): um módulo carregado com `node --import` que troca `statSync`, `lstatSync`, `existsSync`, `realpathSync`
+// (e o `.native`), `accessSync` e `readdirSync` do `node:fs` por versões que anotam o caminho (texto) e chamam a original. Prova, sem rede
+// real e sem medir tempo, que o hook não olha o disco do arquivo lido: o caminho de teste leva uma marca (`docalvo-xk7`) que não pode aparecer
+// no registro. O controle prova que o espião funciona: o registro tem de ter o executável de mentira que o hook consulta.
+const MD_MARCA = 'docalvo-xk7';
+const MD_ESPIAO = join(MD_BASE, 'espiao.mjs');
+writeFileSync(MD_ESPIAO, [
+  "import fs from 'node:fs';",
+  "import { syncBuiltinESMExports } from 'node:module';",
+  'const log = process.env.INTOCA_ESPIAO_LOG;',
+  'const grava = (nome, a) => { if (typeof a === "string") try { fs.appendFileSync(log, `${nome} ${a}\\n`); } catch { /* sem registro */ } };',
+  "for (const nome of ['statSync', 'lstatSync', 'existsSync', 'accessSync', 'readdirSync']) {",
+  '  const orig = fs[nome];',
+  '  fs[nome] = (...a) => { grava(nome, a[0]); return orig(...a); };',
+  '}',
+  'const real = fs.realpathSync;',
+  'fs.realpathSync = Object.assign((...a) => { grava("realpathSync", a[0]); return real(...a); },',
+  '  { native: (...a) => { grava("realpathSync.native", a[0]); return real.native(...a); } });',
+  'syncBuiltinESMExports();',
+  '',
+].join('\n'));
+let md_logs = 0;
+function lerDocEspiao(arquivo, env) {
+  md_logs += 1;
+  const log = join(MD_BASE, `espiao-${md_logs}.log`);
+  writeFileSync(log, '');
+  const r = rodar('pre-ferramenta', {
+    hook_event_name: 'PreToolUse', cwd: FORA, session_id: sessao(), permission_mode: 'default', tool_name: 'Read', tool_input: { file_path: arquivo },
+  }, { env: { ...env, INTOCA_ESPIAO_LOG: log }, node: ['--import', pathToFileURL(MD_ESPIAO).href] });
+  return { r, registro: readFileSync(log, 'utf8') };
+}
+const consultouArquivo = (registro) => registro.split('\n').filter((l) => l.toLowerCase().includes(MD_MARCA) || l.toLowerCase().includes('servidor-inexistente-xyz'));
+const espiaoFunciona = (registro) => registro.toLowerCase().includes(MD_NOME) || { ok: false, detalhe: `o espião não registrou nem a consulta ao executável de mentira: ${registro.slice(0, 200)}` };
+
+for (const unc of [`\\\\servidor-inexistente-xyz\\pasta\\${MD_MARCA}.pdf`, `//servidor-inexistente-xyz/pasta/${MD_MARCA}.pdf`]) {
+  casoMd(`(rede) Read de ${unc} com a ferramenta: o hook não consulta o disco desse caminho (espião) e avisa pelo texto`, () => {
+    const { r, registro } = lerDocEspiao(unc, MD_COM);
+    const consultas = consultouArquivo(registro);
+    return todos(espiaoFunciona(registro), consultas.length === 0 ? true : { ok: false, detalhe: `consultou o disco: ${consultas.join(' | ')}` }, mdAvisou(r));
+  });
+}
+casoMd('(rede) caminho UNC dentro de `.out` ou de segredo, só pelo texto: cala, também sem consultar o disco', () => {
+  const unc = `\\\\servidor-inexistente-xyz\\pasta\\.out\\${MD_MARCA}.pdf`;
+  const { r, registro } = lerDocEspiao(unc, MD_COM);
+  return todos(espiaoFunciona(registro), consultouArquivo(registro).length === 0 ? true : { ok: false, detalhe: consultouArquivo(registro).join(' | ') }, mdCalou(r));
+});
+casoMd('(rede) sem a ferramenta, nada do arquivo lido é consultado (nem local, nem de rede)', () => {
+  const locais = [join(FORA, 'x', `${MD_MARCA}.pdf`), `\\\\servidor-inexistente-xyz\\pasta\\${MD_MARCA}.pdf`];
+  return todos(...locais.map((arq) => {
+    const { r, registro } = lerDocEspiao(arq, MD_SEM);
+    return todos(mdCalou(r), consultouArquivo(registro).length === 0 ? true : { ok: false, detalhe: `consultou: ${consultouArquivo(registro).join(' | ')}` });
+  }));
+});
+casoMd('(rede) fumaça: Read de \\\\servidor-inexistente-xyz\\pasta\\a.pdf com a ferramenta responde em poucos segundos, bem abaixo dos 5 s do hook', () => {
+  const t0 = performance.now();
+  const r = lerDoc('\\\\servidor-inexistente-xyz\\pasta\\a.pdf', MD_COM);
+  const ms = performance.now() - t0;
+  return todos(mdAvisou(r), ms < 3500 ? true : { ok: false, detalhe: `${ms.toFixed(0)} ms` });
+});
+
+// Heurística de nome (palavra inteira), dos dois lados.
+for (const nome of ['desenhada.pdf', 'chaveamento.pdf', 'Resenha.pdf', 'keystone.pdf', 'monkeys.pdf', 'vault.xlsx', 'acessos.pdf']) {
+  casoMd(`(nome) ${nome} não é nome de segredo: avisa`, () => mdAvisou(lerDoc(join(FORA, 'x', nome), MD_COM)));
+}
+for (const nome of ['segredos.xlsx', 'Senhas.pdf', 'minhas-senhas.docx', 'palavra-chave.pdf', 'chaves.xls', 'api_key.pdf', 'apikey.pdf', 'keys.xlsx', 'secrets.pdf', 'passwords.docx', 'chave.pem.pdf', 'x.kdbx.pdf']) {
+  casoMd(`(nome) ${nome} cala (heurística de nome, na dúvida)`, () => mdCalou(lerDoc(join(FORA, 'x', nome), MD_COM)));
+}
+for (const pasta of ['secrets', 'passwords', 'senhas', '_segredos', 'Chaves']) {
+  casoMd(`(nome) pasta ${pasta}/x.pdf cala`, () => mdCalou(lerDoc(join(FORA, pasta, 'x.pdf'), MD_COM)));
+}
+
+// Formas do Windows no caminho (decide só pelo texto).
+casoMd('(forma) fluxo NTFS `a.pdf:stream` avisa como `a.pdf`, e `.out::$INDEX_ALLOCATION` conta como `.out`', () => todos(
+  mdAvisou(lerDoc(`${join(FORA, 'x', 'a.pdf')}:stream`, MD_COM)),
+  mdCalou(lerDoc(`${join(FORA, '.out')}::$INDEX_ALLOCATION${sep}a.pdf`, MD_COM))));
+casoMd('(forma) ponto e espaço no fim: `a.pdf.` e `a.pdf ` avisam; pasta `.out.` e `.out ` calam (no Windows, onde o fim não conta)', () => {
+  if (!NO_WINDOWS) return { ok: true, aviso: 'PULADO: ponto e espaço no fim do nome só são ignorados no Windows' };
+  return todos(mdAvisou(lerDoc(`${join(FORA, 'x', 'a.pdf')}.`, MD_COM)), mdAvisou(lerDoc(`${join(FORA, 'x', 'a.pdf')} `, MD_COM)),
+    mdCalou(lerDoc(`${join(FORA, '.out')}.${sep}a.pdf`, MD_COM)), mdCalou(lerDoc(`${join(FORA, '.out')} ${sep}a.pdf`, MD_COM)));
+});
+casoMd('(forma) LIMITE DECLARADO: junção ou link para dentro de `.out` não é visto (o hook decide pelo texto e não resolve link): avisa', () => {
+  const base = REAL(mkdtempSync(join(MD_BASE, 'ligacao-')));
+  mkdirSync(join(base, '.out', 'private'), { recursive: true });
+  juncao(join(base, '.out'), join(base, 'atalho'));
+  return mdAvisou(lerDoc(join(base, 'atalho', 'x.pdf'), MD_COM));
+});
 
 // ------------------------------ quem é o chat, sede, manifesto, desligamento
 
@@ -2632,6 +2931,66 @@ caso('pacote', 'PLG-17: claude plugin validate não aponta erro no pacote (pula 
   const motivos = antesDoDiretorio.split('\n').filter((l) => l.includes('❯') || /^Validating /.test(l)).map((l) => l.trim()).join(' | ');
   return { ok: false, detalhe: `claude ${claude.versao}: ${motivos}`.slice(0, 800) };
 });
+casoMd('(g) o sentinela não está em nenhum arquivo do pacote (nem no teste, que o monta em pedaços)', () => {
+  const achados = [];
+  for (const rel of readdirSync(PACOTE, { recursive: true })) {
+    const abs = join(PACOTE, String(rel));
+    try {
+      if (!statSync(abs).isFile() || /\.(png|jpe?g|gif|ico|webp)$/i.test(abs) || statSync(abs).size > 5_000_000) continue;
+      const t = readFileSync(abs, 'utf8');
+      if (t.includes(MD_SENTINELA) || t.includes(MD_EXE)) achados.push(String(rel));
+    } catch { /* arquivo sumiu ou não é legível: não conta */ }
+  }
+  return achados.length === 0 ? true : { ok: false, detalhe: achados.join(', ') };
+});
+// Texto do pacote: o doc, as skills e o CHANGELOG dizem o que o código faz (1.2.9).
+casoMd('o doc traz as regras de uso, o comando, a ausência da ferramenta e o roteiro de máquina nova', () => {
+  const d = lerPacote('docs/leitura-de-documentos.md').replace(/\s+/g, ' ');
+  const faltam = ['`-o`', 'fora do repositório', 'URL', 'OCR', 'layout', '.env', 'INTOCA_MARKITDOWN', 'offset', 'Grep', 'leia o documento do jeito de antes',
+    'ambiente isolado', 'versão fixada', 'markitdown[pdf,docx,pptx,xlsx,xls,outlook]==0.1.9', 'github.com/microsoft/markitdown', 'nunca roda o `markitdown`',
+    'Em toda leitura de documento', 'Não bloqueia', 'palavra inteira', 'Falso positivo aceito', 'O que ainda avisa', 'só pelo texto do caminho', 'Limite dito', 'unidade mapeada', 'conferida **antes** do caminho', 'heurística de nome'].filter((t) => !d.includes(t));
+  return faltam.length === 0 ? true : { ok: false, detalhe: `faltam: ${faltam.join(' | ')}` };
+});
+casoMd('as skills gerente, executor, diretoria e secretaria apontam para o doc; plantao e consultor ficam como estavam', () => {
+  const problemas = [];
+  for (const s of ['gerente', 'executor', 'diretoria', 'secretaria']) {
+    if (!lerPacote(`skills/${s}/SKILL.md`).includes('${CLAUDE_PLUGIN_ROOT}/docs/leitura-de-documentos.md')) problemas.push(`${s} sem a linha`);
+  }
+  for (const s of ['plantao', 'consultor']) if (lerPacote(`skills/${s}/SKILL.md`).includes('leitura-de-documentos')) problemas.push(`${s} mexida sem precisar`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoMd('o doc de ambiente cita o markitdown como passo da pessoa e o script do ambiente não o conhece', () => {
+  const amb = lerPacote('docs/ambiente.md').replace(/\s+/g, ' ');
+  const script = lerPacote('scripts/ambiente.mjs');
+  return amb.includes('leitura-de-documentos.md') && amb.includes('não o instala nem o confere') && !/markitdown/i.test(script) ? true
+    : { ok: false, detalhe: 'ambiente.md sem o passo, ou ambiente.mjs conhece o markitdown' };
+});
+casoMd('o CHANGELOG 1.2.9 diz o que o código faz e não faz, sem ID de OS', () => {
+  const log = lerPacote('CHANGELOG.md');
+  const e = log.slice(log.indexOf('## [1.2.9]'), log.indexOf('## [1.2.8]')).replace(/\s+/g, ' ');
+  const problemas = [];
+  if (!log.includes('## [1.2.9] - 2026-11-20')) problemas.push('sem a entrada 1.2.9');
+  for (const x of ['Só avisa', 'não converte', 'não roda o `markitdown`', 'Cala sem a ferramenta', 'OCR', '`INTOCA_MARKITDOWN`', 'toda', '`.env.pdf`',
+    'não conhece', 'passo da pessoa']) if (!e.includes(x)) problemas.push(`a entrada 1.2.9 não diz "${x}"`);
+  if (/(?:PLG|INT|DIR|SAL)-[0-9]+/.test(e)) problemas.push('a entrada 1.2.9 cita ID de OS (regra PLG-06a)');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+
+casoMd('a decisão pelo caminho não toca o disco (sem realpath, stat nem exists) e a ferramenta é conferida antes dela', () => {
+  const t = lerPacote('hooks/pre-ferramenta.mjs');
+  const ini = t.indexOf('function caminhoNaoSeConverte');
+  const fim = t.indexOf('function avisoDeDocumento');
+  const codigo = t.slice(ini, fim).split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const aviso = t.slice(fim, t.indexOf('// `contexto`: aviso que acompanha'));
+  const problemas = [];
+  if (ini < 0 || fim < ini) problemas.push('função não achada');
+  if (/realpath|statSync|lstatSync|existsSync|readdirSync|accessSync/.test(codigo)) problemas.push('caminhoNaoSeConverte toca o disco');
+  if (/realpath/.test(t.slice(t.indexOf('documento no Read (PLG-43)'), t.indexOf('// `contexto`: aviso que acompanha')).split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'))) problemas.push('o bloco do aviso usa realpath');
+  const a = aviso.indexOf('markitdownDisponivel()');
+  const b = aviso.indexOf('caminhoNaoSeConverte(entrada');
+  if (a < 0 || b < 0 || a > b) problemas.push('a ferramenta não é conferida antes do caminho');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
 // PLG-06a (1.0.0): licença, autor, ícone, changelog e versões dos dois pacotes (o `intoca-sala` é o pacote-irmão, na pasta ao lado).
 const PACOTE_SALA = join(PACOTE, '..', 'intoca-sala');
 const lerDe = (raiz, rel) => readFileSync(join(raiz, ...rel.split('/')), 'utf8').replace(/^﻿/, '').replace(/\r\n?/g, '\n');
@@ -2641,7 +3000,7 @@ function dimensoesDoPng(arquivo) {
   return { assinatura, largura: b.readUInt32BE(16), altura: b.readUInt32BE(20), bytes: b.length };
 }
 for (const [rotulo, raiz, versao, nomeDeExibicao, versoes] of [
-  ['intoca', PACOTE, '1.1.0', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.1.0']],
+  ['intoca', PACOTE, '1.2.9', 'InToca Sede', ['0.1.0', '0.2.0', '0.3.0', '0.3.1', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0', '0.8.0', '0.8.1', '0.9.0', '0.9.1', '0.9.2', '0.9.3', '0.9.4', '0.10.0', '1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', '1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9']],
   // O `intoca-sala` anda por conta própria: sem número fixo aqui, a versão sai do `plugin.json` e as versões, do `CHANGELOG.md` do pacote.
   ['intoca-sala', PACOTE_SALA, null, 'InToca Sala', null],
 ]) {
@@ -4395,11 +4754,11 @@ casoCom('estático: boas-vindas tem o resumo e as sete seções; git-e-github co
   const faltam = [...secoes.filter((s) => !b.includes(s)), ...temas.filter((s) => !g.includes(s))];
   return faltam.length === 0 ? true : { ok: false, detalhe: faltam.join(' | ') };
 });
-casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.1.0', () => {
+casoCom('estático: README e plugin.json trazem /intoca:comecar, o ponteiro, titulos, o script e a versão 1.2.9', () => {
   const r = lerPacote('README.md');
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
   const faltam = ['/intoca:comecar', '.intoca/sede', 'titulos', 'criar-sede.mjs', 'INTOCA_HOME'].filter((t) => !r.includes(t));
-  return faltam.length === 0 && p.version === '1.1.0' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
+  return faltam.length === 0 && p.version === '1.2.9' ? true : { ok: false, detalhe: `faltam no README: ${faltam.join(', ')}; versão ${p.version}` };
 });
 casoCom('estático: o script não grava fora do que o regimento permite (sem rm nem cópia; o único rename é o do mover; escrita só com wx)', () => {
   const t = lerPacote('scripts/criar-sede.mjs').replace('renameSync, realpathSync } from', 'realpathSync } from').replace('renomear: renameSync', 'renomear: null');
@@ -6374,9 +6733,9 @@ casoSala('estático: sem rede própria, git nunca pergunta usuário (o clone é 
   return rede.length === 0 && t.includes("GIT_TERMINAL_PROMPT: '0'") && segredo.length === 0
     ? true : { ok: false, detalhe: `rede=${rede.join()} segredo=${segredo.join()}` };
 });
-casoSala('estático: plugin.json na 1.1.0 e o README e o CHANGELOG do pacote trazem a versão', () => {
+casoSala('estático: plugin.json na 1.2.9 e o README e o CHANGELOG do pacote trazem a versão', () => {
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
-  return p.version === '1.1.0' && lerPacote('README.md').includes('versão 1.1.0') && lerPacote('CHANGELOG.md').includes('## [1.1.0] - ') ? true : { ok: false, detalhe: `versão ${p.version}` };
+  return p.version === '1.2.9' && lerPacote('README.md').includes('versão 1.2.9') && lerPacote('CHANGELOG.md').includes('## [1.2.9] - ') ? true : { ok: false, detalhe: `versão ${p.version}` };
 });
 casoSala('estático: o CHANGELOG existe e nenhum arquivo novo cita caminho de máquina', () => {
   const novos = ['scripts/instalar-sala.mjs', 'docs/boas-vindas.md', 'skills/comecar/SKILL.md', 'CHANGELOG.md', 'LICENSE'];
@@ -7288,9 +7647,9 @@ casoCons('comecar: a pergunta do consultor existe, entre o rigor e o primeiro pr
   const faltam = frases.filter((f) => !plano(t).includes(f));
   return crescente && faltam.length === 0 ? true : { ok: false, detalhe: `ordem=${ordem.join(',')} faltam=${faltam.join(' | ')}` };
 });
-casoCons('versão 1.1.0 no plugin.json, no README e no CHANGELOG', () => {
+casoCons('versão 1.2.9 no plugin.json, no README e no CHANGELOG', () => {
   const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
-  return p.version === '1.1.0' && lerPacote('README.md').includes('versão 1.1.0') && lerPacote('CHANGELOG.md').includes('## [1.1.0] - ')
+  return p.version === '1.2.9' && lerPacote('README.md').includes('versão 1.2.9') && lerPacote('CHANGELOG.md').includes('## [1.2.9] - ')
     ? true : { ok: false, detalhe: `versão ${p.version}` };
 });
 casoCons('assistente vigia: só ferramentas de leitura, modelo sonnet, não lê valor de .env e manda vigilância contínua para Rotina', () => {
@@ -7321,6 +7680,2877 @@ casoCons('hooks.json: nenhuma entrada nova de UserPromptSubmit (o consultor é m
   const scripts = h.hooks.UserPromptSubmit.flatMap((g) => g.hooks.map((x) => x.args.join(' ')));
   return scripts.length === 2 && scripts.some((s) => s.endsWith('prompt-os.mjs')) && scripts.some((s) => s.endsWith('chat-trocado.mjs'))
     && lerPacote('hooks/chat-trocado.mjs').includes("await import('./consultor.mjs')") ? true : { ok: false, detalhe: scripts.join(' | ') };
+});
+
+// ---------------------------------------------------------------- ambiente (PLG-34)
+// O `/intoca:ambiente` registra o mapa do ambiente do Claude (`diretoria/ambiente.yaml`) e o refaz numa máquina nova. O script
+// `scripts/ambiente.mjs` recebe os processos por injeção: aqui eles são falsos, então NADA é instalado nem executado de verdade, e a
+// pasta do Claude de cada caso é de mentira, dentro da pasta temporária. Nenhum valor de segredo, de cabeçalho ou de env pode
+// aparecer no arquivo gravado nem na saída: os casos plantam valores-sentinela nas fontes e conferem que eles nunca saem.
+
+const casoAmb = (nome, fn) => caso('ambiente', nome, fn);
+const SCRIPT_AMBIENTE = join(PACOTE, 'scripts', 'ambiente.mjs');
+const SENT_ENV = 'valor-de-env-que-nunca-pode-sair-7Q';
+const SENT_CABECALHO = 'valor-de-cabecalho-que-nunca-pode-sair-9Z';
+const SENT_ARGUMENTO = 'valor-de-argumento-que-nunca-pode-sair-3K';
+const SENTINELAS = [SENT_ENV, SENT_CABECALHO, SENT_ARGUMENTO];
+const FICHA_FALSA = ['ghp', '_', 'Ab1Cd2'.repeat(6)].join(''); // montada por partes: o arquivo do teste não carrega uma ficha por extenso
+const escreveJson = (arquivo, dado) => { mkdirSync(dirname(arquivo), { recursive: true }); writeFileSync(arquivo, JSON.stringify(dado, null, 2)); };
+const barrasAmb = (p) => p.replace(/\\/g, '/');
+
+// Uma máquina de mentira: pasta pessoal com `.claude`, uma sede e as fontes que o registro lê.
+function cenarioAmb({ completo = true } = {}) {
+  const base = REAL(mkdtempSync(join(raizTeste, 'amb-')));
+  const c = { base, casa: join(base, 'casa'), sede: join(base, 'sede'), claude: join(base, 'casa', '.claude') };
+  mkdirSync(join(c.sede, 'diretoria'), { recursive: true });
+  mkdirSync(join(c.sede, 'catalogo-local'), { recursive: true });
+  writeFileSync(join(c.sede, 'sede.yaml'), 'versao: 1\n');
+  const catalogos = {
+    'catalogo-oficial': { source: { source: 'github', repo: 'empresa-exemplo/catalogo-oficial' } },
+    'sede-local': { source: { source: 'directory', path: join(c.sede, 'catalogo-local') } },
+  };
+  const plugins = {
+    'ferramenta-a@catalogo-oficial': [{ scope: 'user', version: '1.4.0' }],
+    'ferramenta-b@catalogo-oficial': [{ scope: 'user', version: '0.3.0' }],
+    'intoca@sede-local': [{ scope: 'user', version: '1.2.0' }],
+    'so-do-projeto@catalogo-oficial': [{ scope: 'project', version: '9.9.9' }],
+  };
+  const hooks = {
+    SessionStart: [{ hooks: [{ type: 'command', command: `"python" -I -S "${join(c.base, 'sala', 'app', 'hooks', 'capture.py')}"` }] }],
+    Stop: [{ hooks: [{ type: 'command', command: `"python" -I -S "${join(c.base, 'sala', 'app', 'hooks', 'capture.py')}"` }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'if command -v repowise-augment >/dev/null 2>&1; then exec repowise-augment; fi' }] }],
+  };
+  const settings = {
+    env: { CHAVE_DE_TESTE: SENT_ENV },
+    permissions: { defaultMode: 'acceptEdits', allow: ['Read', 'Bash(git status)'], ask: ['Bash(rm *)'] },
+    enabledPlugins: { 'ferramenta-a@catalogo-oficial': true, 'ferramenta-b@catalogo-oficial': false, 'intoca@sede-local': true },
+    extraKnownMarketplaces: catalogos,
+    hooks,
+  };
+  if (completo) {
+    catalogos['catalogo-fora'] = { source: { source: 'directory', path: join(c.base, 'fora', 'catalogo') } };
+    settings.mcpServers = {
+      'base-de-conhecimento': { command: 'servidor-exemplo', args: ['mcp', join(c.base, 'fora', 'dados'), '--api-key', SENT_ARGUMENTO, `--token=${SENT_ARGUMENTO}`, '--transport', 'stdio'], env: { CHAVE_DE_EXEMPLO: SENT_ENV } },
+      'local-na-sede': { command: 'node', args: [join(c.sede, 'ferramentas', 'servidor.js')] },
+    };
+    escreveJson(join(c.claude, '.claude.json'), { mcpServers: { 'servico-aberto': { type: 'http', url: 'https://mcp.exemplo.invalid/aberto' }, 'servico-remoto': { type: 'http', url: `https://mcp.exemplo.invalid/mcp?chave=${SENT_ARGUMENTO}`, headers: { Authorization: `Bearer ${SENT_CABECALHO}` } } } });
+  } else {
+    delete plugins['ferramenta-b@catalogo-oficial'];
+    delete settings.hooks.PostToolUse;
+    delete settings.enabledPlugins['ferramenta-b@catalogo-oficial'];
+  }
+  escreveJson(join(c.claude, 'settings.json'), settings);
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), { version: 2, plugins });
+  escreveJson(join(c.claude, 'plugins', 'known_marketplaces.json'), catalogos);
+  return c;
+}
+
+// Máquina vazia: só a pasta pessoal e uma sede com o `ambiente.yaml` copiado de outra.
+function maquinaVazia(ambienteYaml) {
+  const base = REAL(mkdtempSync(join(raizTeste, 'amb-vazia-')));
+  const c = { base, casa: join(base, 'casa'), sede: join(base, 'sede'), claude: join(base, 'casa', '.claude') };
+  mkdirSync(join(c.sede, 'diretoria'), { recursive: true });
+  mkdirSync(c.claude, { recursive: true });
+  writeFileSync(join(c.sede, 'sede.yaml'), 'versao: 1\n');
+  if (ambienteYaml !== undefined) writeFileSync(join(c.sede, 'diretoria', 'ambiente.yaml'), ambienteYaml);
+  return c;
+}
+
+const VERSOES_AMB = { node: 'v24.1.0', python: 'Python 3.13.1', uv: 'uv 0.11.0', git: 'git version 2.50.0', gh: 'gh version 2.62.0 (2026-01-01)', gitleaks: '8.30.1' };
+
+// Os processos falsos. `o` escolhe o que a máquina "tem" e como cada passo termina; `chamadas` guarda tudo o que foi pedido.
+function falsosAmb(o = {}) {
+  const e = { claude: true, ferramentas: Object.keys(VERSOES_AMB), gitleaks: 'limpo', falhaEm: null, ...o };
+  const chamadas = [];
+  const salaChamadas = [];
+  const rodar = (cmd, args) => {
+    const nome = String(cmd);
+    chamadas.push({ cmd: nome, args });
+    const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', erro: null });
+    const falha = (stderr = 'erro') => ({ status: 1, stdout: '', stderr, erro: null });
+    const ausente = { status: null, stdout: '', stderr: '', erro: 'ENOENT' };
+    if (nome === 'claude') {
+      if (!e.claude) return ausente;
+      if (args[0] === '--version') return ok('2.1.325 (Claude Code)');
+      if (args[0] === 'plugin' && args[1] === 'list') return ok(JSON.stringify(e.lista ?? []));
+      const chave = args.slice(0, 3).join(' ');
+      if (e.falhaEm && chave.startsWith(e.falhaEm)) return falha('catálogo não achado');
+      return ok(`feito: ${args.join(' ')}`);
+    }
+    if (nome === 'winget' && args[0] === '--version') return ok('v1.10.0');
+    if (nome === 'winget') return ok('instalado');
+    if (nome === 'gitleaks') {
+      if (!e.ferramentas.includes('gitleaks')) return ausente;
+      if (e.gitleaks === 'versao-falha') return { status: 3, stdout: '', stderr: 'boom', erro: null };
+      if (args[0] === 'version') return ok(VERSOES_AMB.gitleaks);
+      if (e.gitleaks === 'erro') return { status: 2, stdout: '', stderr: 'unknown flag', erro: null };
+      return e.gitleaks === 'achou' ? { status: 1, stdout: '', stderr: 'leaks found', erro: null } : ok('no leaks found');
+    }
+    const alvo = nome === 'python3' ? 'python' : nome;
+    if (VERSOES_AMB[alvo] !== undefined && nome !== 'python3') return e.ferramentas.includes(alvo) ? ok(VERSOES_AMB[alvo]) : ausente;
+    return ausente;
+  };
+  const instalarSala = (entrada) => { salaChamadas.push(entrada); return e.sala === 'falha' ? { ok: false, erros: [{ codigo: 'hooks-falhou', mensagem: 'não registrou' }] } : { ok: true, erros: [] }; };
+  return { rodar, instalarSala, chamadas, salaChamadas, claude: e.claude ? 'claude' : null };
+}
+const claudeChamou = (f, ...trechos) => f.chamadas.some((x) => x.cmd === 'claude' && trechos.every((t) => x.args.includes(t)));
+const chamadasDoClaude = (f) => f.chamadas.filter((x) => x.cmd === 'claude' && x.args[0] !== '--version' && x.args[1] !== 'list').map((x) => x.args.join(' '));
+const algumaChamadaDeEscrita = (f) => f.chamadas.some((x) => (x.cmd === 'claude' && ['install', 'add', 'disable'].some((v) => x.args.includes(v))) || x.cmd === 'winget' && x.args[0] === 'install');
+
+function rodarAmb(entrada, c, f, extra = {}) {
+  return executarAmb({ sede: c.sede, ...entrada }, { rodar: f.rodar, claude: f.claude, instalarSala: f.instalarSala, pastaDoClaude: c.claude, casa: c.casa, plataforma: 'win32', maquina: 'maquina-de-teste', agora: () => new Date(2026, 10, 14), ...extra });
+}
+const arquivoAmb = (c) => join(c.sede, 'diretoria', 'ambiente.yaml');
+const lerAmb = (c) => readFileSync(arquivoAmb(c), 'utf8');
+function registrarEGravar(c, f = falsosAmb()) {
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, f);
+  if (!r.ok) throw new Error(`registrar falhou no preparo: ${JSON.stringify(r).slice(0, 300)}`);
+  return r;
+}
+function restaurarConfirmado(c, f, extra = {}) {
+  const p = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f, extra);
+  return rodarAmb({ acao: 'restaurar', confirmado: true, plano: p.plano_hash }, c, f, extra);
+}
+const vazamentos = (...textos) => SENTINELAS.filter((s) => textos.some((t) => String(t).includes(s)));
+const semVazar = (...textos) => { const v = vazamentos(...textos); return v.length === 0 ? true : { ok: false, detalhe: `vazou: ${v.join(', ')}` }; };
+const comCasaAmb = comCasa;
+
+// ------------------------------ registrar
+
+casoAmb('registrar: grava só nomes, mesmo com valores em env, cabeçalho e argumento nas fontes (nenhum sentinela sai)', () => {
+  const c = cenarioAmb();
+  const f = falsosAmb();
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, f);
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const y = texto ? lerYaml(texto) : {};
+  const problemas = [];
+  if (!r.ok || r.estado !== 'gravado') problemas.push(`estado ${r.estado}: ${JSON.stringify(r.erros)}`);
+  if (vazamentos(texto, JSON.stringify(r)).length) problemas.push(`vazou ${vazamentos(texto, JSON.stringify(r)).join(', ')}`);
+  const mcp = Object.fromEntries((y.servidores_mcp ?? []).map((s) => [s.nome, s]));
+  if (JSON.stringify(mcp['base-de-conhecimento']?.variaveis) !== JSON.stringify(['CHAVE_DE_EXEMPLO'])) problemas.push('não guardou o NOME da variável');
+  if (!mcp['base-de-conhecimento']?.argumentos?.includes('<definir>') || !mcp['base-de-conhecimento']?.argumentos?.includes('--token=<definir>')) problemas.push('argumento sensível não virou <definir>');
+  if (JSON.stringify(mcp['servico-remoto']?.cabecalhos) !== JSON.stringify(['Authorization'])) problemas.push('cabeçalho: só o nome devia ficar');
+  if (mcp['servico-remoto']?.url !== 'https://mcp.exemplo.invalid/mcp') problemas.push(`url com a parte depois do ? : ${mcp['servico-remoto']?.url}`);
+  if (texto.includes('CHAVE_DE_TESTE')) problemas.push('o env das configurações não é do registro e saiu');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: o conteúdo é o mínimo (catálogos, plugins de usuário, hooks por nome, permissões só em contagem, ferramentas)', () => {
+  const c = cenarioAmb();
+  registrarEGravar(c);
+  const y = lerYaml(lerAmb(c));
+  const nomes = (l, k) => (l ?? []).map((x) => x[k]).sort().join(',');
+  const problemas = [];
+  if (y.versao !== 1 || y.registrado_em?.maquina !== 'maquina-de-teste' || y.registrado_em?.data !== '2026-11-14' || y.registrado_em?.claude_code !== '2.1.325') problemas.push(`registrado_em ${JSON.stringify(y.registrado_em)}`);
+  if (nomes(y.catalogos, 'nome') !== 'catalogo-fora,catalogo-oficial,sede-local') problemas.push(`catálogos ${nomes(y.catalogos, 'nome')}`);
+  if (nomes(y.plugins, 'id') !== 'ferramenta-a@catalogo-oficial,ferramenta-b@catalogo-oficial,intoca@sede-local') problemas.push(`plugins ${nomes(y.plugins, 'id')} (plugin de projeto não entra)`);
+  if (y.plugins?.find((p) => p.id.startsWith('ferramenta-b'))?.habilitado !== false) problemas.push('habilitado:false não foi guardado');
+  if (nomes(y.hooks, 'nome') !== 'repowise,sala-animada') problemas.push(`hooks ${nomes(y.hooks, 'nome')}`);
+  const sala = y.hooks?.find((h) => h.nome === 'sala-animada');
+  if (JSON.stringify(sala?.eventos) !== JSON.stringify(['SessionStart', 'Stop']) || !sala?.refazer) problemas.push(`sala-animada ${JSON.stringify(sala)}`);
+  if (/capture\.py|repowise-augment/.test(lerAmb(c))) problemas.push('copiou o conteúdo de um hook');
+  if (JSON.stringify(y.permissoes) !== JSON.stringify({ modo: 'acceptEdits', allow: 2, ask: 1, deny: 0 })) problemas.push(`permissões ${JSON.stringify(y.permissoes)}`);
+  if (/Bash\(|git status/.test(lerAmb(c))) problemas.push('copiou uma regra de permissão');
+  if (nomes(y.ferramentas, 'nome') !== 'gh,git,gitleaks,node,python,uv') problemas.push(`ferramentas ${nomes(y.ferramentas, 'nome')}`);
+  if (!Array.isArray(y.passos_da_pessoa) || y.passos_da_pessoa.length < 5) problemas.push('faltam os passos da pessoa');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: caminho absoluto vira relativo à sede ou <definir>; nenhum caminho de máquina no arquivo', () => {
+  const c = cenarioAmb();
+  registrarEGravar(c);
+  const texto = lerAmb(c);
+  const y = lerYaml(texto);
+  const cat = Object.fromEntries(y.catalogos.map((k) => [k.nome, k]));
+  const mcp = Object.fromEntries(y.servidores_mcp.map((s) => [s.nome, s]));
+  const problemas = [];
+  if (cat['sede-local']?.tipo !== 'pasta_da_sede' || cat['sede-local']?.origem !== 'catalogo-local') problemas.push(`sede-local ${JSON.stringify(cat['sede-local'])}`);
+  if (cat['catalogo-fora']?.tipo !== 'pasta_da_maquina' || cat['catalogo-fora']?.origem !== null) problemas.push(`catalogo-fora ${JSON.stringify(cat['catalogo-fora'])}`);
+  if (JSON.stringify(mcp['local-na-sede']?.argumentos) !== JSON.stringify(['${SEDE}/ferramentas/servidor.js'])) problemas.push(`local-na-sede ${JSON.stringify(mcp['local-na-sede']?.argumentos)}`);
+  if (mcp['base-de-conhecimento']?.precisa_ajuste !== true) problemas.push('caminho de fora devia pedir ajuste');
+  for (const forma of [c.base, barrasAmb(c.base), c.base.toLowerCase(), barrasAmb(c.base).toLowerCase()]) if (texto.includes(forma)) problemas.push(`o texto tem o caminho da máquina (${forma.length} caracteres)`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: a varredura recusa gravar quando acha segredo e diz só o nome do campo (nada é gravado)', () => {
+  const c = cenarioAmb({ completo: false });
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { 'servidor-com-ficha': { command: 'servidor-exemplo', args: ['mcp', FICHA_FALSA] } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const bruto = JSON.stringify(r);
+  const problemas = [];
+  if (r.ok !== false || r.erros?.[0]?.codigo !== 'segredo-na-varredura') problemas.push(`esperava segredo-na-varredura; veio ${bruto.slice(0, 200)}`);
+  if (!r.erros?.[0]?.campos?.includes('servidores_mcp[0].argumentos[1]')) problemas.push(`campo não apontado: ${JSON.stringify(r.erros?.[0]?.campos)}`);
+  if (bruto.includes(FICHA_FALSA)) problemas.push('o valor saiu na resposta');
+  if (existsSync(arquivoAmb(c))) problemas.push('gravou o arquivo mesmo assim');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: o gitleaks, quando existe, também roda; achado recusa gravar; sem ele o registro segue e diz "ausente"', () => {
+  const achou = cenarioAmb();
+  const r1 = rodarAmb({ acao: 'registrar', confirmado: true }, achou, falsosAmb({ gitleaks: 'achou' }));
+  const sem = cenarioAmb();
+  const f = falsosAmb({ ferramentas: ['node', 'git'] });
+  const r2 = rodarAmb({ acao: 'registrar', confirmado: true }, sem, f);
+  const limpo = cenarioAmb();
+  const r3 = rodarAmb({ acao: 'registrar', confirmado: true }, limpo, falsosAmb());
+  const problemas = [];
+  if (r1.ok !== false || r1.erros?.[0]?.codigo !== 'segredo-no-gitleaks' || existsSync(arquivoAmb(achou))) problemas.push(`achou: ${JSON.stringify(r1).slice(0, 160)}`);
+  if (!r2.ok || r2.gitleaks !== 'ausente' || r2.estado !== 'gravado') problemas.push(`ausente: ${JSON.stringify(r2).slice(0, 160)}`);
+  if (!r3.ok || r3.gitleaks !== 'limpo') problemas.push(`limpo: ${JSON.stringify(r3).slice(0, 160)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: mostra o que mudou e só grava com a confirmação; sem mudança, não grava de novo', () => {
+  const c = cenarioAmb();
+  const f = falsosAmb();
+  const primeiro = rodarAmb({ acao: 'registrar' }, c, f);
+  const antesDeConfirmar = existsSync(arquivoAmb(c));
+  const gravou = rodarAmb({ acao: 'registrar', confirmado: true }, c, f);
+  const texto1 = lerAmb(c);
+  const igual = rodarAmb({ acao: 'registrar', confirmado: true }, c, f);
+  const instalados = JSON.parse(readFileSync(join(c.claude, 'plugins', 'installed_plugins.json'), 'utf8'));
+  instalados.plugins['intoca@sede-local'][0].version = '1.3.0';
+  instalados.plugins['plugin-novo@catalogo-oficial'] = [{ scope: 'user', version: '0.1.0' }];
+  delete instalados.plugins['ferramenta-b@catalogo-oficial'];
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), instalados);
+  const mudou = rodarAmb({ acao: 'registrar' }, c, f);
+  const intactoAteConfirmar = lerAmb(c) === texto1;
+  const problemas = [];
+  if (primeiro.estado !== 'aguardando-confirmacao' || antesDeConfirmar) problemas.push(`sem confirmação: ${primeiro.estado}, gravou=${antesDeConfirmar}`);
+  if (gravou.estado !== 'gravado') problemas.push(`confirmado: ${gravou.estado}`);
+  if (igual.estado !== 'sem-mudancas') problemas.push(`igual: ${igual.estado}`);
+  const m = mudou.mudancas ?? [];
+  if (!m.includes('plugin mudou: intoca@sede-local (1.2.0 → 1.3.0)') || !m.includes('novo plugin: plugin-novo@catalogo-oficial') || !m.includes('plugin saiu: ferramenta-b@catalogo-oficial')) problemas.push(`mudanças: ${JSON.stringify(m)}`);
+  if (!intactoAteConfirmar) problemas.push('mexeu no arquivo antes da confirmação');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: sem sede explica e para (nada é gravado)', () => {
+  const c = cenarioAmb();
+  const vazio = REAL(mkdtempSync(join(raizTeste, 'amb-sem-sede-')));
+  const cwd = process.cwd();
+  let r;
+  try {
+    process.chdir(vazio);
+    r = comCasaAmb({ casa: vazio }, () => executarAmb({ acao: 'registrar', confirmado: true }, { rodar: falsosAmb().rodar, pastaDoClaude: c.claude, casa: vazio, plataforma: 'win32' }));
+  } finally { process.chdir(cwd); }
+  const problemas = [];
+  if (r.ok !== false || r.erros?.[0]?.codigo !== 'sem-sede') problemas.push(`veio ${JSON.stringify(r).slice(0, 200)}`);
+  if (readdirSync(vazio).length !== 0) problemas.push('gravou algo na pasta sem sede');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: só lê o Claude (as fontes ficam byte a byte iguais) e só grava o ambiente.yaml', () => {
+  const c = cenarioAmb();
+  const fontes = ['settings.json', '.claude.json', join('plugins', 'installed_plugins.json'), join('plugins', 'known_marketplaces.json')].map((n) => join(c.claude, n));
+  const antes = fontes.map((a) => readFileSync(a, 'utf8'));
+  const r = registrarEGravar(c);
+  const depois = fontes.map((a) => readFileSync(a, 'utf8'));
+  const naSede = readdirSync(join(c.sede, 'diretoria'));
+  const problemas = [];
+  if (antes.some((t, i) => t !== depois[i])) problemas.push('alterou uma fonte do Claude');
+  if (naSede.join(',') !== 'ambiente.yaml') problemas.push(`diretoria: ${naSede.join(',')}`);
+  if (readdirSync(c.claude).sort().join(',') !== ['.claude.json', 'plugins', 'settings.json'].sort().join(',')) problemas.push('criou algo na pasta do Claude');
+  if (!r.ok) problemas.push('não registrou');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ restaurar
+
+const ORDEM_AMB = ['claude', 'ferramenta', 'catalogo', 'plugin', 'hooks', 'mcp'];
+
+casoAmb('restaurar --so-plano numa máquina vazia lista tudo na ordem (ferramentas, catálogos, plugins, hooks, MCP) e não executa nada', () => {
+  const origem = cenarioAmb();
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const f = falsosAmb({ ferramentas: [] });
+  const r = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const tipos = (r.passos ?? []).map((p) => p.tipo);
+  const rank = tipos.map((t) => ORDEM_AMB.indexOf(t));
+  const problemas = [];
+  if (!r.ok || r.estado !== 'plano') problemas.push(`estado ${r.estado}: ${JSON.stringify(r.erros)}`);
+  if (rank.some((x, i) => x < 0 || (i > 0 && x < rank[i - 1]))) problemas.push(`fora de ordem: ${tipos.join(',')}`);
+  const cont = (t) => tipos.filter((x) => x === t).length;
+  if (cont('ferramenta') !== 6 || cont('catalogo') !== 3 || cont('plugin') !== 3 || cont('hooks') !== 2 || cont('mcp') !== 4) problemas.push(`contagem: ${tipos.join(',')}`);
+  if (algumaChamadaDeEscrita(f)) problemas.push('executou algo em --so-plano');
+  if (!r.passos?.some((p) => p.comando === 'claude plugin install -- intoca@sede-local')) problemas.push('falta o comando de instalar o intoca');
+  if (!r.passos?.some((p) => p.tipo === 'catalogo' && p.alvo === 'sede-local' && p.comando.includes(join(c.sede, 'catalogo-local')))) problemas.push('o catálogo da sede devia apontar para a sede desta máquina');
+  if (!Array.isArray(r.passos_da_pessoa) || r.passos_da_pessoa.length < 5) problemas.push('faltam os passos da pessoa');
+  if (r.passos?.some((p, i) => p.n !== i + 1)) problemas.push('passos sem numeração');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar com tudo já presente diz "nada a fazer" (e não chama nenhum comando que escreve)', () => {
+  const c = cenarioAmb();
+  registrarEGravar(c);
+  const f = falsosAmb();
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (!r.ok || r.estado !== 'nada-a-fazer' || (r.passos ?? []).length !== 0) problemas.push(`estado ${r.estado}: ${JSON.stringify(r.passos?.map((p) => p.alvo))}`);
+  if (algumaChamadaDeEscrita(f)) problemas.push('executou algo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar sem o "sim" só mostra o plano; com o "sim" instala o plugin que falta, depois do catálogo, e relata cada saída', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const semSim = falsosAmb();
+  const a = rodarAmb({ acao: 'restaurar' }, c, semSim);
+  const f = falsosAmb({ lista: [{ id: 'ferramenta-a@catalogo-oficial', version: '1.5.0' }] });
+  const r = restaurarConfirmado(c, f);
+  const feitas = chamadasDoClaude(f);
+  const problemas = [];
+  if (a.estado !== 'aguardando-confirmacao' || algumaChamadaDeEscrita(semSim)) problemas.push(`sem sim: ${a.estado}`);
+  if (!r.ok || r.estado !== 'restaurado') problemas.push(`com sim: ${r.estado} ${JSON.stringify(r.parou)}`);
+  const esperadas = [
+    `plugin marketplace add -- empresa-exemplo/catalogo-oficial`,
+    `plugin marketplace add -- ${join(c.sede, 'catalogo-local')}`,
+    'plugin install -- ferramenta-a@catalogo-oficial',
+    'plugin install -- intoca@sede-local',
+  ];
+  if (JSON.stringify(feitas) !== JSON.stringify(esperadas)) problemas.push(`chamadas: ${JSON.stringify(feitas)}`);
+  if (!(r.executados ?? []).every((x) => x.estado === 'feito' && typeof x.saida === 'string')) problemas.push('cada passo devia relatar a saída');
+  if (!f.salaChamadas.some((s) => s.acao === 'animada' && s.hooks === true && s.confirmado === true && s.simular === false && s.sede === c.sede)) problemas.push(`hooks da sala animada: ${JSON.stringify(f.salaChamadas)}`);
+  if (!(r.avisos ?? []).some((x) => x.includes('ferramenta-a@catalogo-oficial') && x.includes('1.5.0') && x.includes('1.4.0'))) problemas.push(`faltou o aviso de versão: ${JSON.stringify(r.avisos)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: plugin registrado como desabilitado volta desabilitado (plugin disable depois do install)', () => {
+  const origem = cenarioAmb();
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  copyFileSyncAmb(join(origem.claude, 'plugins', 'known_marketplaces.json'), join(c.claude, 'plugins', 'known_marketplaces.json'));
+  const f = falsosAmb();
+  restaurarConfirmado(c, f);
+  const feitas = chamadasDoClaude(f);
+  const i = feitas.indexOf('plugin install -- ferramenta-b@catalogo-oficial');
+  return i >= 0 && feitas[i + 1] === 'plugin disable -- ferramenta-b@catalogo-oficial' ? true : { ok: false, detalhe: JSON.stringify(feitas) };
+});
+
+casoAmb('restaurar: passo que depende da pessoa PARA a execução, lista o que sobrou e não executa nada depois dele', () => {
+  const origem = cenarioAmb();
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  // catálogos presentes; faltam os plugins (reproduzíveis), depois os hooks do repowise (da pessoa), o resto vem depois
+  copyFileSyncAmb(join(origem.claude, 'plugins', 'known_marketplaces.json'), join(c.claude, 'plugins', 'known_marketplaces.json'));
+  const f = falsosAmb();
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (r.estado !== 'parou-na-pessoa') problemas.push(`estado ${r.estado}`);
+  if (!(r.executados ?? []).length || !(r.executados ?? []).every((x) => x.tipo === 'plugin')) problemas.push(`executados: ${JSON.stringify(r.executados?.map((x) => x.alvo))}`);
+  if (!String(r.parou?.motivo ?? '').includes('repowise')) problemas.push(`parou: ${JSON.stringify(r.parou)}`);
+  const restante = (r.restante ?? []).map((p) => `${p.tipo}:${p.alvo}`);
+  if (!restante.includes('hooks:sala-animada') || !restante.includes('mcp:servico-remoto')) problemas.push(`restante: ${restante.join(',')}`);
+  if (f.salaChamadas.length !== 0 || claudeChamou(f, 'mcp', 'add')) problemas.push('executou passo depois do que é da pessoa');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: servidor MCP que precisa de variável, de ajuste ou que roda comando local nunca é adicionado sozinho (é da pessoa, sem valor)', () => {
+  const origem = cenarioAmb();
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const f = falsosAmb({ ferramentas: Object.keys(VERSOES_AMB) });
+  const r = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const mcp = Object.fromEntries((r.passos ?? []).filter((p) => p.tipo === 'mcp').map((p) => [p.alvo, p]));
+  const problemas = [];
+  if (!mcp['base-de-conhecimento']?.pessoa || mcp['base-de-conhecimento']?.comando !== null || !mcp['base-de-conhecimento']?.motivo.includes('CHAVE_DE_EXEMPLO')) problemas.push(`base-de-conhecimento: ${JSON.stringify(mcp['base-de-conhecimento'])}`);
+  if (!mcp['servico-remoto']?.pessoa || !mcp['servico-remoto']?.motivo.includes('Authorization')) problemas.push(`servico-remoto: ${JSON.stringify(mcp['servico-remoto'])}`);
+  const local = mcp['local-na-sede'];
+  if (!local?.pessoa || local?.comando !== null || JSON.stringify(r).includes('servidor.js')) problemas.push(`local-na-sede (stdio) devia ser da pessoa, sem repetir o comando do arquivo: ${JSON.stringify(local)}`);
+  const aberto = mcp['servico-aberto'];
+  if (aberto?.pessoa !== false || aberto?.comando !== 'claude mcp add -s user --transport http -- servico-aberto https://mcp.exemplo.invalid/aberto') problemas.push(`servico-aberto: ${JSON.stringify(aberto)}`);
+  problemas.push(...vazamentos(JSON.stringify(r)).map((v) => `vazou ${v}`));
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar nunca sobrescreve o que já existe: versão diferente só aparece em "diferencas"; nada é chamado nem regravado', () => {
+  const c = cenarioAmb();
+  registrarEGravar(c);
+  const instalados = JSON.parse(readFileSync(join(c.claude, 'plugins', 'installed_plugins.json'), 'utf8'));
+  instalados.plugins['ferramenta-a@catalogo-oficial'][0].version = '0.1.0';
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), instalados);
+  const fontes = ['settings.json', '.claude.json', join('plugins', 'installed_plugins.json'), join('plugins', 'known_marketplaces.json')].map((n) => join(c.claude, n));
+  const antes = fontes.map((a) => readFileSync(a, 'utf8'));
+  const ambienteAntes = lerAmb(c);
+  const f = falsosAmb();
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (r.estado !== 'nada-a-fazer') problemas.push(`estado ${r.estado}`);
+  const d = (r.diferencas ?? []).find((x) => x.alvo === 'ferramenta-a@catalogo-oficial');
+  if (!d || d.arquivo !== '1.4.0' || d.maquina !== '0.1.0') problemas.push(`diferencas: ${JSON.stringify(r.diferencas)}`);
+  if (algumaChamadaDeEscrita(f)) problemas.push('executou algo');
+  if (antes.some((t, i) => t !== readFileSync(fontes[i], 'utf8')) || lerAmb(c) !== ambienteAntes) problemas.push('regravou um arquivo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: sem o programa do Claude o primeiro passo é da pessoa e nada mais é tentado', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const f = falsosAmb({ claude: false });
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (r.estado !== 'parou-na-pessoa' || r.passos?.length !== 1 || r.passos?.[0]?.tipo !== 'claude') problemas.push(`${r.estado} ${JSON.stringify(r.passos?.map((p) => p.tipo))}`);
+  if (algumaChamadaDeEscrita(f)) problemas.push('executou algo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: passo que falha para na hora, relata a saída e não segue (o catálogo que falha bloqueia o resto)', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const f = falsosAmb({ falhaEm: 'plugin marketplace add' });
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (r.estado !== 'falhou' || r.ok !== false || r.erros?.[0]?.codigo !== 'passo-falhou' || r.executados?.length !== 1 || r.executados?.[0]?.estado !== 'falhou') problemas.push(`${r.estado} ${JSON.stringify(r.executados)}`);
+  if (claudeChamou(f, 'plugin', 'install')) problemas.push('instalou plugin depois de o catálogo falhar');
+  if (f.salaChamadas.length !== 0) problemas.push('seguiu para os hooks');
+  if (!(r.restante ?? []).length) problemas.push('não listou o que sobrou');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: ferramenta que só se instala com administrador (sudo) é passo da pessoa, nunca executado', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  const f = falsosAmb({ ferramentas: [] });
+  // no Linux o gerenciador é o apt: todos os comandos pedem `sudo`
+  const antigo = f.rodar;
+  const f2 = { ...f, rodar: (cmd, a) => (cmd === 'apt-get' ? { status: 0, stdout: 'apt', stderr: '', erro: null } : antigo(cmd, a)) };
+  const r = restaurarConfirmado(c, f2, { plataforma: 'linux' });
+  const problemas = [];
+  if (r.estado !== 'parou-na-pessoa' || !r.passos?.[0]?.pessoa || r.passos?.[0]?.tipo !== 'ferramenta') problemas.push(`${r.estado} ${JSON.stringify(r.passos?.[0])}`);
+  if ((r.executados ?? []).length !== 0) problemas.push('executou algo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('restaurar: sem ambiente.yaml, sem sede ou com formato desconhecido, explica e para', () => {
+  const c = maquinaVazia();
+  const f = falsosAmb();
+  const sem = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  writeFileSync(arquivoAmb(c), 'versao: 99\n');
+  const velho = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const problemas = [];
+  if (sem.ok !== false || sem.erros?.[0]?.codigo !== 'sem-ambiente') problemas.push(`sem arquivo: ${JSON.stringify(sem).slice(0, 160)}`);
+  if (velho.ok !== false || velho.erros?.[0]?.codigo !== 'formato-desconhecido') problemas.push(`formato: ${JSON.stringify(velho).slice(0, 160)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+function copyFileSyncAmb(de, para) {
+  mkdirSync(dirname(para), { recursive: true });
+  writeFileSync(para, readFileSync(de));
+}
+
+// ------------------------------ segunda rodada (revisão): o arquivo é hostil até a validação
+// O `ambiente.yaml` mora no Git: quem o altera não é necessariamente a pessoa. Nada dele vira comando sem passar por um padrão estrito,
+// o que o script executa vem de tabelas fixas, caminho de máquina nunca sai e o plano executado é o que foi mostrado.
+
+const DISCO = ['C', ':'].join(''); // a unidade de disco montada por partes: o pacote não carrega caminho de máquina por extenso
+const yamlHostil = (corpo) => `versao: 1\n${corpo.trim()}\n`;
+const paraMaquina = (corpo, f = falsosAmb({ ferramentas: [] })) => ({ c: maquinaVazia(yamlHostil(corpo)), f });
+const comandosDe = (f) => f.chamadas.map((x) => `${x.cmd} ${x.args.join(' ')}`);
+const sondas = (x) => ['--version', 'version'].includes(x.args[0]) || (x.cmd === 'claude' && x.args[1] === 'list');
+const inesperadas = (f) => f.chamadas.filter((x) => !sondas(x));
+const passosDe = (r) => Object.fromEntries((r.passos ?? []).map((p) => [`${p.tipo}:${p.alvo}`, p]));
+
+casoAmb('yaml hostil: "instalar" do arquivo nunca é executado (powershell, node -e, sh -c); só a tabela fixa por nome conhecido roda', () => {
+  const { c, f } = paraMaquina(`
+ferramentas:
+  - nome: node
+    versao_minima: "20"
+    instalar: "powershell -Command evil"
+  - nome: meu-tool
+    versao_minima: "1"
+    instalar: "node -e process.exit(7)"
+  - nome: constructor
+    versao_minima: "1"
+    instalar: "sh -c x"
+  - nome: git
+    versao_minima: "2"
+    instalar: "winget install Evil.Pacote"`);
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (!plano.ok || p['ferramenta:node']?.comando !== 'winget install OpenJS.NodeJS.LTS') problemas.push(`node: ${JSON.stringify(p['ferramenta:node'])}`);
+  if (p['ferramenta:git']?.comando !== 'winget install Git.Git') problemas.push(`git: ${JSON.stringify(p['ferramenta:git'])}`);
+  for (const nome of ['meu-tool', 'constructor']) {
+    const x = p[`ferramenta:${nome}`];
+    if (!x?.pessoa || x.comando !== null || 'sugestao' in x) problemas.push(`${nome} devia ser da pessoa, sem repetir a sugestão do arquivo: ${JSON.stringify(x)}`);
+  }
+  const feitas = inesperadas(f).map((x) => `${x.cmd} ${x.args.join(' ')}`);
+  if (JSON.stringify(feitas) !== JSON.stringify(['winget install OpenJS.NodeJS.LTS'])) problemas.push(`executou: ${JSON.stringify(feitas)}`);
+  if (r.estado !== 'parou-na-pessoa') problemas.push(`estado ${r.estado}`);
+  if (comandosDe(f).some((x) => /powershell|Evil|\bsh\b|-e process/.test(x))) problemas.push('executou texto vindo do arquivo');
+  if (/powershell|Evil|sh -c|node -e|process\.exit/.test(JSON.stringify(plano) + JSON.stringify(r))) problemas.push('a saída repetiu o texto do arquivo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil: catálogo com "..", "-x", absoluto, fora do padrão, com senha ou com nome começando por "-" é recusado; só o bom roda, com "--"', () => {
+  const { c, f } = paraMaquina(`
+catalogos:
+  - nome: c1
+    tipo: pasta_da_sede
+    origem: "../fora"
+  - nome: c2
+    tipo: github
+    origem: "-x/y"
+  - nome: c3
+    tipo: github
+    origem: "a/b/c"
+  - nome: c4
+    tipo: pasta_da_sede
+    origem: "${DISCO}\\\\Windows"
+  - nome: c4b
+    tipo: pasta_da_sede
+    origem: "/etc"
+  - nome: c6
+    tipo: git
+    origem: "https://u:p@x.invalid/r.git"
+  - nome: c7
+    tipo: git
+    origem: "--upload-pack=evil"
+  - nome: "-c8"
+    tipo: github
+    origem: "dono/repo"
+  - nome: c9
+    tipo: pasta_da_sede
+    origem: "sub/../../x"
+  - nome: c10
+    tipo: github
+    origem: "dono repo/x"
+  - nome: bom
+    tipo: github
+    origem: "dono/repo"
+  - nome: c5
+    tipo: pasta_da_maquina
+    origem: "/etc"`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) if (!p[`catalogo:entrada ${n}`]?.recusada) problemas.push(`a entrada ${n} devia ser recusada: ${JSON.stringify(p[`catalogo:entrada ${n}`])}`);
+  if (plano.resumo?.recusadas !== 10) problemas.push(`recusadas: ${plano.resumo?.recusadas}`);
+  if (!p['catalogo:c5']?.pessoa || p['catalogo:c5']?.comando !== null) problemas.push('pasta da máquina antiga devia ser passo da pessoa, sem comando');
+  const adds = inesperadas(f).filter((x) => x.args.includes('add')).map((x) => x.args.join(' '));
+  if (JSON.stringify(adds) !== JSON.stringify(['plugin marketplace add -- dono/repo'])) problemas.push(`executou: ${JSON.stringify(adds)}`);
+  if (r.estado !== 'parou-na-pessoa') problemas.push(`estado ${r.estado}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil: id de plugin fora do padrão nome@catálogo (começa com "-", espaço, dois @, "..") é recusado e nunca instalado', () => {
+  const { c, f } = paraMaquina(`
+plugins:
+  - id: "-x@y"
+    versao: "1"
+    habilitado: true
+  - id: "a b@c"
+    versao: "1"
+    habilitado: true
+  - id: "a@b@c"
+    versao: "1"
+    habilitado: true
+  - id: "x@-y"
+    versao: "1"
+    habilitado: true
+  - id: "../x@y"
+    versao: "1"
+    habilitado: true
+  - id: "--scope=project@y"
+    versao: "1"
+    habilitado: true
+  - id: bom@cat
+    versao: "1"
+    habilitado: true`, falsosAmb());
+  const r = restaurarConfirmado(c, f);
+  const instaladas = inesperadas(f).map((x) => x.args.join(' '));
+  const problemas = [];
+  if (JSON.stringify(instaladas) !== JSON.stringify(['plugin install -- bom@cat'])) problemas.push(`executou: ${JSON.stringify(instaladas)}`);
+  if (r.resumo?.recusadas !== 6) problemas.push(`recusadas: ${r.resumo?.recusadas}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil: servidor MCP stdio do arquivo (sh -c, node -e, npx) nunca é executado, só mostrado; http só se https limpo; o resto é recusado', () => {
+  const { c, f } = paraMaquina(`
+servidores_mcp:
+  - nome: s1
+    tipo: stdio
+    comando: sh
+    argumentos: ["-c", "evil"]
+    variaveis: []
+    precisa_ajuste: false
+  - nome: s2
+    tipo: stdio
+    comando: node
+    argumentos: ["-e", "x"]
+    variaveis: []
+    precisa_ajuste: false
+  - nome: s2b
+    tipo: stdio
+    comando: npx
+    argumentos: ["pacote-qualquer"]
+    variaveis: []
+    precisa_ajuste: false
+  - nome: s3
+    tipo: http
+    url: "http://insegura.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false
+  - nome: s4
+    tipo: http
+    url: "https://u:pw@host.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false
+  - nome: s5
+    tipo: ftp
+    url: "ftp://x.invalid"
+  - nome: "-s6"
+    tipo: http
+    url: "https://ok.invalid/mcp"
+  - nome: ok
+    tipo: http
+    url: "https://ok.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const problemas = [];
+  for (const n of ['s1', 's2', 's2b', 's3', 's4']) if (!p[`mcp:${n}`]?.pessoa || p[`mcp:${n}`]?.comando !== null) problemas.push(`${n} devia ser da pessoa, sem comando: ${JSON.stringify(p[`mcp:${n}`])}`);
+  for (const n of [6, 7]) if (!p[`mcp:entrada ${n}`]?.recusada) problemas.push(`a entrada ${n} devia ser recusada`);
+  if (p['mcp:ok']?.comando !== 'claude mcp add -s user --transport http -- ok https://ok.invalid/mcp') problemas.push(`ok: ${JSON.stringify(p['mcp:ok']?.comando)}`);
+  if (/evil/.test(JSON.stringify(plano))) problemas.push('a saída repetiu o comando do arquivo');
+  // execução: só o servidor remoto limpo (sem os passos da pessoa que o antecedem)
+  const so = paraMaquina(`
+servidores_mcp:
+  - nome: s3
+    tipo: http
+    url: "http://insegura.invalid/mcp"
+  - nome: s5
+    tipo: ftp
+    url: "ftp://x.invalid"`, falsosAmb());
+  const r = restaurarConfirmado(so.c, so.f);
+  if (r.estado !== 'parou-na-pessoa' || claudeChamou(so.f, 'mcp', 'add')) problemas.push('executou servidor que não é https limpo');
+  const bom = paraMaquina(`
+servidores_mcp:
+  - nome: s5
+    tipo: ftp
+    url: "ftp://x.invalid"
+  - nome: ok
+    tipo: http
+    url: "https://ok.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false`, falsosAmb());
+  restaurarConfirmado(bom.c, bom.f);
+  const feitas = inesperadas(bom.f).map((x) => x.args.join(' '));
+  if (JSON.stringify(feitas) !== JSON.stringify(['mcp add -s user --transport http -- ok https://ok.invalid/mcp'])) problemas.push(`executou: ${JSON.stringify(feitas)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil: hooks com "refazer" inventado, ou com a pasta do Claude diferente da do instalador da sala, nunca disparam o instalador', () => {
+  const falso = paraMaquina(`
+hooks:
+  - nome: outro
+    eventos: ["Stop"]
+    refazer: "instalar-sala animada com hooks"
+    como: "qualquer coisa"`, falsosAmb());
+  const r1 = restaurarConfirmado(falso.c, falso.f);
+  const normal = paraMaquina(`
+hooks:
+  - nome: sala-animada
+    eventos: ["Stop"]
+    refazer: "instalar-sala animada com hooks"`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, normal.c, normal.f);
+  const h = passosDe(plano)['hooks:sala-animada'];
+  const outra = paraMaquina(`
+hooks:
+  - nome: sala-animada
+    eventos: ["Stop"]
+    refazer: "instalar-sala animada com hooks"`, falsosAmb());
+  const r3 = rodarAmb({ acao: 'restaurar', so_plano: true }, outra.c, outra.f, { pastaDoClaude: join(outra.c.base, 'outra-pasta-do-claude') });
+  const problemas = [];
+  if (falso.f.salaChamadas.length !== 0 || r1.estado !== 'parou-na-pessoa') problemas.push(`refazer inventado: ${r1.estado}, sala=${falso.f.salaChamadas.length}`);
+  if (!h || h.pessoa || !/settings\.json/.test(`${h.altera} ${h.motivo}`) || !/ALTERA/.test(h.motivo) || !/cópia de segurança/.test(h.motivo) || !/EXECUTA código/.test(h.motivo)) problemas.push(`o plano devia dizer que mexe no settings.json (com cópia de segurança) e executa código baixado: ${JSON.stringify(h)}`);
+  if (!passosDe(r3)['hooks:sala-animada']?.pessoa) problemas.push('com outra pasta do Claude devia ser passo da pessoa');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: caminho absoluto depois do "=" de qualquer opção, e prefixos de Unix, macOS, file:// e variáveis, nunca saem (viram <definir>, ~/ ou ${SEDE}/)', () => {
+  const c = cenarioAmb({ completo: false });
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = {
+    'caminhos': {
+      command: `${DISCO}\\Tools\\servidor.exe`,
+      args: [`--diretorio=${DISCO}\\x`, '--root=/home/u/x', '/Applications/App/bin', ['file://', 'Users', 'u', 'x'].join('/'), '%USERPROFILE%\\dados', '$HOME/dados', '~\\dados', '--cfg=%APPDATA%\\x', '/Library/x', '/nix/store/x', '/opt/x', '--p=file:///C:/x', `--dentro=${join(c.sede, 'ferramentas', 'x.js')}`, '--nome=valor-comum'],
+    },
+  };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const m = lerYaml(texto).servidores_mcp?.[0] ?? {};
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  for (const proibido of [`${DISCO}\\`, 'C:/', '/home/u', '/Applications', ['', 'Users', 'u'].join('/'), '/Library', '/nix', '/opt/x', 'APPDATA', 'USERPROFILE', '$HOME']) if (texto.includes(proibido) || JSON.stringify({ ...r, arquivo: null, criados: null, jaExistiam: null }).includes(proibido)) problemas.push(`saiu "${proibido}"`);
+  const esperado = ['--diretorio=<definir>', '--root=<definir>', '<definir>', '<definir>', '~/dados', '~/dados', '~/dados', '--cfg=<definir>', '<definir>', '<definir>', '<definir>', '--p=<definir>', '--dentro=${SEDE}/ferramentas/x.js', '--nome=valor-comum'];
+  if (JSON.stringify(m.argumentos) !== JSON.stringify(esperado)) problemas.push(`argumentos: ${JSON.stringify(m.argumentos)}`);
+  if (m.comando !== '<definir>' || m.precisa_ajuste !== true) problemas.push(`comando: ${JSON.stringify(m.comando)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: URL com usuário, senha e parâmetros (catálogo git e MCP remoto) perde essas partes; o valor não vai para o arquivo nem para a saída', () => {
+  const c = cenarioAmb({ completo: false });
+  const k = JSON.parse(readFileSync(join(c.claude, 'plugins', 'known_marketplaces.json'), 'utf8'));
+  k['catalogo-privado'] = { source: { source: 'git', url: 'https://usuario:senha-que-nao-pode-sair-55@exemplo.invalid/org/catalogo.git' } };
+  k['catalogo-torto'] = { source: { source: 'git', url: 'não é uma url' } };
+  escreveJson(join(c.claude, 'plugins', 'known_marketplaces.json'), k);
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { remoto: { type: 'http', url: 'https://u:segredo-do-mcp-77@mcp.exemplo.invalid/mcp?chave=outro-segredo-88#x' }, 'com-chave-no-caminho': { type: 'http', url: `https://mcp.exemplo.invalid/${'Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8'}/mcp` } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const y = texto ? lerYaml(texto) : {};
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  for (const proibido of ['senha-que-nao-pode-sair-55', 'usuario', 'segredo-do-mcp-77', 'outro-segredo-88', 'Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8']) if (texto.includes(proibido) || JSON.stringify(r).includes(proibido)) problemas.push(`saiu "${proibido}"`);
+  const cat = Object.fromEntries((y.catalogos ?? []).map((x) => [x.nome, x]));
+  if (cat['catalogo-privado']?.origem !== 'https://exemplo.invalid/org/catalogo.git' || cat['catalogo-privado']?.precisa_ajuste !== true) problemas.push(`catalogo-privado: ${JSON.stringify(cat['catalogo-privado'])}`);
+  if (cat['catalogo-torto']?.origem !== null) problemas.push('url torta devia virar origem nula');
+  const mcp = Object.fromEntries((y.servidores_mcp ?? []).map((x) => [x.nome, x]));
+  if (mcp.remoto?.url !== 'https://mcp.exemplo.invalid/mcp' || mcp.remoto?.precisa_ajuste !== true) problemas.push(`remoto: ${JSON.stringify(mcp.remoto)}`);
+  if (mcp['com-chave-no-caminho']?.url !== 'https://mcp.exemplo.invalid' || mcp['com-chave-no-caminho']?.precisa_ajuste !== true) problemas.push(`com-chave-no-caminho: ${JSON.stringify(mcp['com-chave-no-caminho'])}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: fontes do Claude com tipos errados (null, número, texto no lugar de lista ou mapa) não derrubam nada', () => {
+  const c = cenarioAmb({ completo: false });
+  escreveJson(join(c.claude, 'settings.json'), { enabledPlugins: 7, extraKnownMarketplaces: [1, 2], permissions: 'x', hooks: { Stop: 5, SessionStart: [null, { hooks: 3 }, { hooks: [null, { command: 9 }] }] },
+    mcpServers: { a: null, b: { command: 5, args: 'x', env: 3 }, c: { type: 'http', url: 5, headers: [1] }, d: { command: 'node', args: [null, { x: 1 }, 7] } } });
+  escreveJson(join(c.claude, 'plugins', 'known_marketplaces.json'), { x: null, y: { source: 'texto' }, z: { source: { source: 'github', repo: 7 } }, w: { source: { source: 'directory', path: 3 } } });
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'a@b': 'texto', 'c@d': [null, { scope: 'user', version: { x: 1 } }], 'e@f': 5 } });
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const problemas = [];
+  if (!r.ok || r.estado !== 'gravado') problemas.push(`${r.estado}: ${JSON.stringify(r.erros).slice(0, 300)}`);
+  else {
+    const y = lerYaml(lerAmb(c));
+    if (!Array.isArray(y.servidores_mcp) || y.servidores_mcp.length !== 4 || y.servidores_mcp.some((s) => s.precisa_ajuste !== true)) problemas.push(`servidores: ${JSON.stringify(y.servidores_mcp)}`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil: seções com tipos errados (null, número, texto no lugar de lista) não lançam; viram entradas recusadas, sem execução', () => {
+  const { c, f } = paraMaquina(`
+ferramentas:
+  - null
+  - 5
+  - nome: 7
+catalogos: "texto"
+plugins:
+  - null
+  - id: 7
+  - id:
+      a: 1
+servidores_mcp:
+  - nome:
+      a: 1
+  - 3
+hooks: 5
+passos_da_pessoa: 9`, falsosAmb());
+  const r = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const r2 = restaurarConfirmado(c, f);
+  const problemas = [];
+  if (!r.ok || r.estado !== 'plano') problemas.push(`${r.estado}: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  if (r.resumo?.recusadas < 8 || r.resumo?.reprodutiveis !== 0) problemas.push(`resumo: ${JSON.stringify(r.resumo)}`);
+  if (!r2.ok) problemas.push(`confirmado: ${JSON.stringify(r2.erros).slice(0, 200)}`);
+  if (inesperadas(f).length !== 0) problemas.push('executou algo');
+  if (!Array.isArray(r.passos_da_pessoa) || r.passos_da_pessoa.length < 5) problemas.push('passos da pessoa devia voltar ao padrão');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml maior que 256 KB é recusado antes de ser lido (registrar sobre ele e restaurar)', () => {
+  const grande = `versao: 1\n# ${'x'.repeat(300000)}\n`;
+  const c = maquinaVazia(grande);
+  const f = falsosAmb();
+  const rest = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const origem = cenarioAmb({ completo: false });
+  writeFileSync(arquivoAmb(origem), grande);
+  const reg = rodarAmb({ acao: 'registrar', confirmado: true }, origem, falsosAmb());
+  const problemas = [];
+  if (rest.ok !== false || rest.erros?.[0]?.codigo !== 'ambiente-grande') problemas.push(`restaurar: ${JSON.stringify(rest).slice(0, 160)}`);
+  if (reg.ok !== false || reg.erros?.[0]?.codigo !== 'ambiente-grande' || lerAmb(origem) !== grande) problemas.push(`registrar: ${JSON.stringify(reg).slice(0, 160)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('exceção no meio da execução: o relato dos passos já feitos é mantido e o script não lança', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const { c } = { c: maquinaVazia(yamlHostil(`
+plugins:
+  - id: a@c
+    versao: "1"
+    habilitado: true
+  - id: b@c
+    versao: "1"
+    habilitado: true
+  - id: d@c
+    versao: "1"
+    habilitado: true`)) };
+  const f = falsosAmb();
+  const base = f.rodar;
+  const f2 = { ...f, rodar: (cmd, args, op) => { if (cmd === 'claude' && args.includes('b@c')) throw new Error(`explodiu ${c.base}`); return base(cmd, args, op); } };
+  const r = restaurarConfirmado(c, f2);
+  const problemas = [];
+  if (r.ok !== false || r.estado !== 'falhou' || r.erros?.[0]?.codigo !== 'passo-falhou') problemas.push(`${r.ok} ${r.estado}`);
+  const e = r.executados ?? [];
+  if (e.length !== 2 || e[0].estado !== 'feito' || e[0].alvo !== 'a@c' || e[1].estado !== 'falhou' || !e[1].saida.includes('erro interno')) problemas.push(`executados: ${JSON.stringify(e)}`);
+  if (JSON.stringify(r).includes(c.base)) problemas.push('a mensagem da exceção vazou');
+  if (!(r.restante ?? []).some((p) => p.alvo === 'd@c')) problemas.push('restante sem o plugin d');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('o plano executado é o que foi mostrado: sem o hash, com hash errado, ou com o arquivo trocado depois, nada é executado', () => {
+  const origem = cenarioAmb({ completo: false });
+  registrarEGravar(origem);
+  const c = maquinaVazia(lerAmb(origem));
+  copyFileSyncAmb(join(origem.claude, 'plugins', 'known_marketplaces.json'), join(c.claude, 'plugins', 'known_marketplaces.json'));
+  const f = falsosAmb();
+  const mostrado = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const semHash = rodarAmb({ acao: 'restaurar', confirmado: true }, c, f);
+  const errado = rodarAmb({ acao: 'restaurar', confirmado: true, plano: 'abc123' }, c, f);
+  writeFileSync(arquivoAmb(c), lerAmb(c).replace('ferramenta-a@catalogo-oficial', 'outro-plugin@catalogo-oficial'));
+  const trocado = rodarAmb({ acao: 'restaurar', confirmado: true, plano: mostrado.plano_hash }, c, f);
+  const problemas = [];
+  if (!/^[0-9a-f]{20}$/.test(String(mostrado.plano_hash))) problemas.push(`hash: ${mostrado.plano_hash}`);
+  if (semHash.ok !== false || semHash.erros?.[0]?.codigo !== 'plano-nao-mostrado') problemas.push(`sem hash: ${JSON.stringify(semHash.erros)}`);
+  if (errado.ok !== false || errado.erros?.[0]?.codigo !== 'plano-mudou') problemas.push(`hash errado: ${JSON.stringify(errado.erros)}`);
+  if (trocado.ok !== false || trocado.erros?.[0]?.codigo !== 'plano-mudou') problemas.push(`arquivo trocado: ${JSON.stringify(trocado.erros)}`);
+  if (inesperadas(f).length !== 0) problemas.push('executou apesar da recusa');
+  const certo = restaurarConfirmado(c, falsosAmb());
+  if (!certo.ok || certo.estado === undefined || (certo.executados ?? []).length === 0) problemas.push(`com o hash certo: ${certo.estado}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('mensagens não ecoam o texto do arquivo: erro de YAML sem o trecho, e o que aparece do arquivo é curto, sem controle e sem segredo', () => {
+  const ruim = maquinaVazia('versao: 1\nplugins: ["MARCADOR-HOSTIL-123\n');
+  const r1 = rodarAmb({ acao: 'restaurar', so_plano: true }, ruim, falsosAmb());
+  const ruim2 = maquinaVazia('versao: 1\n!!! MARCADOR-HOSTIL-456\n');
+  const r2 = rodarAmb({ acao: 'restaurar', so_plano: true }, ruim2, falsosAmb());
+  const { c, f } = paraMaquina(`plugins:\n  - id: ${JSON.stringify(`\u001b[31m${'Z'.repeat(200)} ${FICHA_FALSA}`)}\n    versao: "1"`, falsosAmb());
+  const r3 = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const problemas = [];
+  if (r1.ok !== false || JSON.stringify(r1).includes('MARCADOR-HOSTIL')) problemas.push(`r1: ${JSON.stringify(r1).slice(0, 200)}`);
+  if (r2.ok !== false || JSON.stringify(r2).includes('MARCADOR-HOSTIL')) problemas.push(`r2: ${JSON.stringify(r2).slice(0, 200)}`);
+  const bruto = JSON.stringify(r3);
+  if (bruto.includes('\\u001b') || bruto.includes(FICHA_FALSA) || bruto.includes('Z'.repeat(100))) problemas.push('o texto do arquivo apareceu sem tratamento');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('gitleaks que existe mas falha (status fora de 0 e 1) aparece como "falhou", com aviso, e não como "ausente"', () => {
+  const c = cenarioAmb({ completo: false });
+  const r = rodarAmb({ acao: 'registrar' }, c, falsosAmb({ gitleaks: 'erro' }));
+  return r.ok && r.gitleaks === 'falhou' && (r.avisos ?? []).length === 1 ? true : { ok: false, detalhe: JSON.stringify(r).slice(0, 300) };
+});
+
+casoAmb('estático: o script não usa shell nem as funções de shell do Node', () => {
+  const t = lerPacote('scripts/ambiente.mjs');
+  const problemas = [];
+  if (/\bshell\s*:/.test(t)) problemas.push('passa `shell:` a um processo');
+  if (/\b(?:exec|execSync|execFile|execFileSync|fork)\s*\(/.test(t) || /import\s*\{[^}]*\b(?:exec|execSync|execFile|execFileSync|fork)\b[^}]*\}\s*from\s*'node:child_process'/.test(t)) problemas.push('usa exec/fork');
+  if (!/spawnSync\(programa, args, \{/.test(t)) problemas.push('o spawnSync mudou de forma');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ terceira rodada: caminho de máquina em qualquer posição e saída sem frase do arquivo
+
+casoAmb('registrar: caminho de máquina em QUALQUER posição do argumento (JSON, lista, chave=valor) vira <definir> inteiro; dentro da sede segue portátil; argumento comum fica intacto', () => {
+  const c = cenarioAmb({ completo: false });
+  const U = ['', 'Users', 'x', 'p'].join('/');
+  const cinco = ['-e', `FOO=${U}`, `--mount=type=bind,source=${DISCO}\\Users\\x`, `--config={"root":"${DISCO}\\\\Users\\\\x"}`, `--paths=a,${DISCO}\\b`];
+  const dentro = join(c.sede, 'ferramentas', 'x.js');
+  const comuns = ['--nome', 'ok', '-y', '@pacote/x', '--transport', 'stdio', 'mcp', 'a:b', 'v1.2.3', '--port=8080', 'https://exemplo.invalid/x/home', 'https://exemplo.invalid/home/x', 'src/lib/x', './opt/x', '${SEDE}/lib/x.js', '~/lib/x'];
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { cinco: { command: 'node', args: cinco }, dentro: { command: 'node', args: [dentro, `--dentro=${dentro}`] }, comuns: { command: 'servidor-exemplo', args: comuns } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const m = Object.fromEntries((texto ? lerYaml(texto).servidores_mcp : []).map((x) => [x.nome, x]));
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  if (JSON.stringify(m.cinco?.argumentos) !== JSON.stringify(['-e', 'FOO=<definir>', '--mount=<definir>', '--config=<definir>', '--paths=<definir>'])) problemas.push(`cinco: ${JSON.stringify(m.cinco?.argumentos)}`);
+  if (m.cinco?.precisa_ajuste !== true) problemas.push('cinco devia pedir ajuste');
+  if (JSON.stringify(m.dentro?.argumentos) !== JSON.stringify(['${SEDE}/ferramentas/x.js', '--dentro=${SEDE}/ferramentas/x.js'])) problemas.push(`dentro: ${JSON.stringify(m.dentro?.argumentos)}`);
+  if (JSON.stringify(m.comuns?.argumentos) !== JSON.stringify(comuns) || m.comuns?.precisa_ajuste !== false) problemas.push(`comuns: ${JSON.stringify(m.comuns?.argumentos)} ajuste=${m.comuns?.precisa_ajuste}`);
+  for (const proibido of ['Users', `${DISCO}\\`, `${DISCO}/`, '=/home', '/x/p', c.base, barrasAmb(c.base)]) if (texto.split('\n').some((l) => l.includes(proibido))) problemas.push(`uma linha do arquivo tem "${proibido.length > 12 ? '(caminho da máquina)' : proibido}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('varredura de caminhos: acha o caminho de máquina em qualquer posição de qualquer campo (catálogo, plugin, MCP, hooks) e não acusa texto comum', () => {
+  const U = ['', 'Users', 'x'].join('/');
+  const sujo = varrerCaminhos({
+    catalogos: [{ origem: `x=${U}` }], plugins: [{ id: `${DISCO}\\a@b` }],
+    servidores_mcp: [{ url: 'https://h.invalid/a', argumentos: [`--p=a,${DISCO}\\b`, 'ok', 'file:///x'] }], hooks: [{ nome: '%APPDATA%' }, { nome: '$HOME/x' }, { nome: `\\\\servidor\\pasta` }],
+  });
+  const limpo = varrerCaminhos({
+    catalogos: [{ origem: 'empresa-exemplo/catalogo' }, { origem: 'https://exemplo.invalid/home/x.git' }, { origem: 'catalogo-local' }],
+    plugins: [{ id: 'a@b', versao: 'b5b01ac4f889' }], servidores_mcp: [{ url: 'https://mcp.exemplo.invalid/mcp', argumentos: ['${SEDE}/lib/x.js', '~/dados', '@pacote/x', 'a:b'] }],
+    hooks: [{ nome: 'sala-animada', como: 'o `hooks-install` da sala animada, pelo passo `animada` do instalar-sala.mjs' }], passos: ['Configurações > Conectores.', 'Autorizar de novo, em `/mcp`, os servidores'],
+  });
+  const problemas = [];
+  const esperado = ['catalogos[0].origem', 'plugins[0].id', 'servidores_mcp[0].argumentos[0]', 'servidores_mcp[0].argumentos[2]', 'hooks[0].nome', 'hooks[1].nome', 'hooks[2].nome'];
+  if (JSON.stringify(sujo) !== JSON.stringify(esperado)) problemas.push(`sujo: ${JSON.stringify(sujo)}`);
+  if (limpo.length !== 0) problemas.push(`falso positivo: ${JSON.stringify(limpo)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('registrar: se a portatilização deixasse passar um caminho, a rede final recusa gravar e diz só o nome do campo', () => {
+  const c = cenarioAmb({ completo: false });
+  const k = JSON.parse(readFileSync(join(c.claude, 'plugins', 'known_marketplaces.json'), 'utf8'));
+  k['catalogo-estranho'] = { source: { source: 'github', repo: `${DISCO}\\dono\\repo` } }; // origem github não passa por portatilizar
+  escreveJson(join(c.claude, 'plugins', 'known_marketplaces.json'), k);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const problemas = [];
+  if (r.ok !== false || r.erros?.[0]?.codigo !== 'caminho-de-maquina' || !r.erros?.[0]?.campos?.some((x) => x.endsWith('.origem'))) problemas.push(`veio ${JSON.stringify(r).slice(0, 220)}`);
+  if (JSON.stringify(r).includes(`${DISCO}\\dono`) || existsSync(arquivoAmb(c))) problemas.push('vazou ou gravou');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml com chave __proto__, constructor ou prototype (em bloco, aninhada ou em JSON) é recusado e não polui nada', () => {
+  const casos = ['versao: 1\n__proto__: x\n', 'versao: 1\nconstructor:\n  a: 1\n', 'versao: 1\nplugins:\n  - id: a@b\n    prototype: x\n', 'versao: 1\nplugins: [{"__proto__": {"x": 1}}]\n', 'versao: 1\nplugins: [{"a": {"constructor": 1}}]\n'];
+  const problemas = [];
+  for (const [i, texto] of casos.entries()) {
+    let lancou = false;
+    try { lerYaml(texto); } catch (e) { lancou = e?.codigo === 'yaml-invalido' && !String(e.message).includes('__proto__'); }
+    if (!lancou) problemas.push(`caso ${i + 1} devia ser recusado`);
+    const c = maquinaVazia(texto);
+    const r = rodarAmb({ acao: 'restaurar', so_plano: true }, c, falsosAmb());
+    if (r.ok !== false || r.erros?.[0]?.codigo !== 'yaml-invalido') problemas.push(`restaurar ${i + 1}: ${JSON.stringify(r).slice(0, 120)}`);
+  }
+  if ({}.x !== undefined || ({}).a !== undefined) problemas.push('poluiu o protótipo');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('gitleaks cujo "version" falha (status diferente de 0, não "não existe") aparece como "falhou"; só a ausência de verdade é "ausente"', () => {
+  const c = cenarioAmb({ completo: false });
+  const falha = rodarAmb({ acao: 'registrar' }, c, falsosAmb({ gitleaks: 'versao-falha' }));
+  const ausente = rodarAmb({ acao: 'registrar' }, c, falsosAmb({ ferramentas: ['node', 'git'] }));
+  const problemas = [];
+  if (!falha.ok || falha.gitleaks !== 'falhou' || (falha.avisos ?? []).length !== 1) problemas.push(`falha: ${JSON.stringify(falha).slice(0, 200)}`);
+  if (!ausente.ok || ausente.gitleaks !== 'ausente') problemas.push(`ausente: ${ausente.gitleaks}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('a saída do restaurar não carrega frase livre do arquivo (sugestão, comando, origem, passos, máquina, data, versão); só nomes validados e frases fixas', () => {
+  const { c, f } = paraMaquina(`
+registrado_em:
+  maquina: "FRASE LIVRE DO ARQUIVO com espaços"
+  data: "FRASE-DATA quando quiser"
+  claude_code: "FRASE-VERSAO; rm -rf"
+catalogos:
+  - nome: c1
+    tipo: github
+    origem: "FRASE-ORIGEM HOSTIL"
+ferramentas:
+  - nome: meu-tool
+    versao_minima: "1"
+    instalar: "FRASE-INSTALAR-HOSTIL"
+servidores_mcp:
+  - nome: s1
+    tipo: stdio
+    comando: "FRASE-COMANDO-HOSTIL"
+    argumentos: ["FRASE-ARGUMENTO-HOSTIL"]
+plugins:
+  - id: p1@catalogo
+    versao: "FRASE-VERSAO-HOSTIL com espaços"
+passos_da_pessoa: ["FRASE-PASSO-HOSTIL"]`, falsosAmb({ ferramentas: [] }));
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  for (const [rotulo, saida] of [['plano', plano], ['confirmado', r]]) {
+    const bruto = JSON.stringify(saida);
+    if (/FRASE|HOSTIL|rm -rf/.test(bruto)) problemas.push(`${rotulo}: a saída repetiu texto do arquivo`);
+  }
+  if (plano.registrado_em?.maquina !== '(inválido)' || plano.registrado_em?.data !== '(inválido)' || plano.registrado_em?.claude_code !== '(inválido)') problemas.push(`registrado_em: ${JSON.stringify(plano.registrado_em)}`);
+  if (JSON.stringify(plano.passos_da_pessoa) !== JSON.stringify(PASSOS_DO_SCRIPT)) problemas.push('os passos da pessoa devem ser os do script');
+  if ((plano.passos ?? []).some((p) => 'sugestao' in p)) problemas.push('sobrou o campo sugestao');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('o plano destaca a origem de catálogo, de plugin e de servidor remoto para a pessoa conferir; plugin cujo catálogo não está na máquina nem no plano leva atenção', () => {
+  const { c, f } = paraMaquina(`
+catalogos:
+  - nome: catalogo-a
+    tipo: github
+    origem: "empresa-exemplo/catalogo-a"
+plugins:
+  - id: um@catalogo-a
+    versao: "1"
+  - id: dois@catalogo-b
+    versao: "1"
+servidores_mcp:
+  - nome: remoto
+    tipo: http
+    url: "https://mcp.exemplo.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false`, falsosAmb());
+  const p = passosDe(rodarAmb({ acao: 'restaurar', so_plano: true }, c, f));
+  const problemas = [];
+  if (p['catalogo:catalogo-a']?.origem !== 'empresa-exemplo/catalogo-a' || p['catalogo:catalogo-a']?.origem_nova !== true) problemas.push(`catálogo: ${JSON.stringify(p['catalogo:catalogo-a'])}`);
+  if (p['plugin:um@catalogo-a']?.catalogo_no_plano !== true || /ATENÇÃO/.test(p['plugin:um@catalogo-a']?.motivo)) problemas.push(`um: ${JSON.stringify(p['plugin:um@catalogo-a'])}`);
+  if (p['plugin:dois@catalogo-b']?.catalogo_no_plano !== false || !/ATENÇÃO/.test(p['plugin:dois@catalogo-b']?.motivo)) problemas.push(`dois: ${JSON.stringify(p['plugin:dois@catalogo-b'])}`);
+  if (p['mcp:remoto']?.origem !== 'https://mcp.exemplo.invalid/mcp' || p['mcp:remoto']?.origem_nova !== true) problemas.push(`remoto: ${JSON.stringify(p['mcp:remoto'])}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ quarta rodada (parecer da Diretoria na integração)
+
+const CHAVE_SK = ['sk', '-', 'Ab1Cd2Ef3Gh4Ij5Kl6'].join(''); // montada por partes: o arquivo do teste não carrega uma chave por extenso
+
+casoAmb('R1: origem que passa na forma mas parece chave é RECUSADA, nunca mascarada; o plano nunca traz "(omitido" e o comando mostrado é o que roda (github, git, plugin, MCP remoto)', () => {
+  const { c, f } = paraMaquina(`
+catalogos:
+  - nome: c1
+    tipo: github
+    origem: "${CHAVE_SK}/repo"
+  - nome: c2
+    tipo: git
+    origem: "https://exemplo.invalid/org/${CHAVE_SK}"
+  - nome: c3
+    tipo: github
+    origem: "dono/repo"
+plugins:
+  - id: "${CHAVE_SK}@catalogo"
+    versao: "1"
+  - id: bom@c3
+    versao: "1"
+servidores_mcp:
+  - nome: m1
+    tipo: http
+    url: "https://exemplo.invalid/${CHAVE_SK}"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false
+  - nome: m2
+    tipo: http
+    url: "https://ok.invalid/mcp"
+    cabecalhos: []
+    variaveis: []
+    precisa_ajuste: false`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const r = restaurarConfirmado(c, f);
+  const p = passosDe(plano);
+  const problemas = [];
+  for (const [chave, rotulo] of [['catalogo:entrada 1', 'github'], ['catalogo:entrada 2', 'git'], ['plugin:entrada 1', 'plugin'], ['mcp:entrada 1', 'MCP remoto']]) {
+    if (!p[chave]?.recusada || !/parece uma chave/.test(p[chave]?.motivo ?? '')) problemas.push(`${rotulo} devia ser recusado: ${JSON.stringify(p[chave])}`);
+  }
+  for (const [rotulo, saida] of [['plano', plano], ['confirmado', r]]) {
+    const bruto = JSON.stringify(saida);
+    if (/omitido/.test(bruto) || bruto.includes(CHAVE_SK)) problemas.push(`${rotulo}: mascarou ou repetiu a chave`);
+  }
+  const feitas = inesperadas(f).map((x) => x.args.join(' '));
+  const esperadas = ['plugin marketplace add -- dono/repo', 'plugin install -- bom@c3', 'mcp add -s user --transport http -- m2 https://ok.invalid/mcp'];
+  if (JSON.stringify(feitas) !== JSON.stringify(esperadas)) problemas.push(`executou: ${JSON.stringify(feitas)}`);
+  if (p['catalogo:c3']?.comando !== 'claude plugin marketplace add -- dono/repo' || p['catalogo:c3']?.origem !== 'dono/repo') problemas.push(`o que se mostra tem de ser o que roda: ${JSON.stringify(p['catalogo:c3'])}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('R2: depois de -e/--env e -H/--header, e em todo nome=valor, só o nome fica (valor curto ou só de letras também); o que o código não garante é a palavra solta sem opção na frente', () => {
+  const c = cenarioAmb({ completo: false });
+  const args = ['-e', 'FOO=abc', '--env', 'KEY=secret', '-H', 'X-Token: abc', '--header=Authorization: Bearer x', 'API_KEY=1', 'password=hunter', '-e', 'SO_NOME', '--header', 'X-Api-Key: letras', '--config=NOME=valor', 'tipo=simples', '--env=A=b', '-e', 'OUTRO_NOME'];
+  // `tipo=simples` (minúsculas, fora do formato NOME_DE_VARIAVEL) deixou de passar intacto na PLG-36: de qualquer `nome=valor` só o nome fica.
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { estrutura: { command: 'servidor-exemplo', args } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const m = texto ? lerYaml(texto).servidores_mcp?.[0] : null;
+  const esperado = ['-e', 'FOO=<definir>', '--env', 'KEY=<definir>', '-H', 'X-Token: <definir>', '--header=Authorization: <definir>', 'API_KEY=<definir>', 'password=<definir>', '-e', '<definir>', '--header', 'X-Api-Key: <definir>', '--config=NOME=<definir>', 'tipo=<definir>', '--env=A=<definir>', '-e', '<definir>'];
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  if (JSON.stringify(m?.argumentos) !== JSON.stringify(esperado)) problemas.push(`argumentos: ${JSON.stringify(m?.argumentos)}`);
+  if (m?.precisa_ajuste !== true) problemas.push('devia pedir ajuste');
+  for (const valor of ['FOO=abc', 'KEY=secret', 'X-Token: abc', 'Bearer', 'API_KEY=1', 'hunter', 'letras', 'NOME=valor', 'A=b']) if (texto.includes(valor)) problemas.push(`saiu "${valor}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('R3: o nome da máquina no arquivo é um apelido neutro (maquina- e 4 letras de hash), nunca o hostname; --maquina troca; apelido inválido é recusado', () => {
+  const c = cenarioAmb({ completo: false });
+  const padrao = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb(), { maquina: undefined });
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const nome = texto ? lerYaml(texto).registrado_em?.maquina : null;
+  const outro = cenarioAmb({ completo: false });
+  const dado = rodarAmb({ acao: 'registrar', confirmado: true, maquina: 'escritorio-01' }, outro, falsosAmb(), { maquina: undefined });
+  const ruim = rodarAmb({ acao: 'registrar', confirmado: true, maquina: 'com espaço' }, cenarioAmb({ completo: false }), falsosAmb(), { maquina: undefined });
+  const problemas = [];
+  if (!padrao.ok || !/^maquina-[0-9a-f]{4}$/.test(String(nome))) problemas.push(`apelido: ${nome}`);
+  if (hostname().length >= 5 && (texto.toLowerCase().includes(hostname().toLowerCase()) || JSON.stringify(padrao).toLowerCase().includes(hostname().toLowerCase()))) problemas.push('o hostname apareceu em claro');
+  if (!dado.ok || lerYaml(lerAmb(outro)).registrado_em?.maquina !== 'escritorio-01') problemas.push('--maquina não valeu');
+  if (ruim.ok !== false || ruim.erros?.[0]?.codigo !== 'maquina-invalida') problemas.push(`apelido inválido: ${JSON.stringify(ruim).slice(0, 160)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('--saida e --arquivo só valem dentro da sede ou de uma pasta temporária, sem ".."; fora disso são recusados e nada é gravado', () => {
+  const c = cenarioAmb({ completo: false });
+  const fora = join(parse(tmpdir()).root, 'fora-do-permitido-intoca', 'ambiente.yaml');
+  const r1 = rodarAmb({ acao: 'registrar', confirmado: true, saida: `${c.base}${sep}..${sep}escapou${sep}ambiente.yaml` }, c, falsosAmb());
+  const r2 = rodarAmb({ acao: 'registrar', confirmado: true, saida: fora }, c, falsosAmb());
+  const r3 = rodarAmb({ acao: 'restaurar', so_plano: true, arquivo: fora }, c, falsosAmb());
+  const r4 = rodarAmb({ acao: 'restaurar', so_plano: true, arquivo: 'diretoria/../../x.yaml' }, c, falsosAmb());
+  const dentro1 = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(c.base, 'pasta-temporaria', 'ambiente.yaml') }, c, falsosAmb());
+  const problemas = [];
+  for (const [rotulo, r] of [['..', r1], ['absoluto fora', r2], ['arquivo fora', r3], ['arquivo com ..', r4]]) if (r.ok !== false || r.erros?.[0]?.codigo !== 'caminho-nao-permitido') problemas.push(`${rotulo}: ${JSON.stringify(r).slice(0, 140)}`);
+  if (existsSync(dirname(fora)) || existsSync(join(c.base, '..', 'escapou'))) problemas.push('gravou fora do permitido');
+  if (!dentro1.ok || !existsSync(join(c.base, 'pasta-temporaria', 'ambiente.yaml'))) problemas.push(`dentro da pasta temporária devia valer: ${JSON.stringify(dentro1.erros)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('executável por nome: só nas pastas absolutas do PATH, nunca na pasta atual (o rodarPrograma do script usa isso no Windows)', () => {
+  const plataforma = process.platform === 'win32' ? 'win32' : 'linux';
+  const sepPath = plataforma === 'win32' ? ';' : ':';
+  const a = REAL(mkdtempSync(join(raizTeste, 'path-a-')));
+  const b = REAL(mkdtempSync(join(raizTeste, 'path-b-')));
+  for (const nome of ['x', 'x.exe', 'y', 'y.exe']) { writeFileSync(join(nome.startsWith('x') ? a : b, nome), ''); }
+  const caminho = [a, 'relativa', '', '.', b].join(sepPath);
+  const achouX = acharNoPath('x', caminho, plataforma, b);
+  const achouY = acharNoPath('y', caminho, plataforma, b);
+  const problemas = [];
+  if (!achouX || basename(achouX).replace(/\.exe$/, '') !== 'x' || dirname(achouX) !== a) problemas.push(`x: ${achouX}`);
+  if (achouY !== null) problemas.push(`y estava só na pasta atual e não podia ser achado: ${achouY}`);
+  if (acharNoPath('nao-existe-mesmo', caminho, plataforma, b) !== null) problemas.push('programa inexistente devia dar null');
+  const fonte = lerPacote('scripts/ambiente.mjs');
+  if (!fonte.includes('acharNoPath(comando)')) problemas.push('o rodarPrograma não usa a busca no PATH no Windows');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('fonte do Claude acima do limite de leitura não derruba o registrar nem some calada: o aviso diz qual fonte ficou de fora e o resto segue', () => {
+  const c = cenarioAmb({ completo: false });
+  escreveJson(join(c.claude, '.claude.json'), { mcpServers: { 'so-no-arquivo-grande': { type: 'http', url: 'https://mcp.exemplo.invalid/g' } }, enchimento: 'x'.repeat(6000) });
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb(), { limiteDeFonte: 4000 });
+  const y = lerYaml(lerAmb(c));
+  const problemas = [];
+  if (!r.ok || r.estado !== 'gravado') problemas.push(`${r.estado}: ${JSON.stringify(r.erros).slice(0, 160)}`);
+  if (!(r.avisos ?? []).some((x) => x.includes('.claude.json') && x.includes('limite'))) problemas.push(`avisos: ${JSON.stringify(r.avisos)}`);
+  if ((y.servidores_mcp ?? []).some((s) => s.nome === 'so-no-arquivo-grande')) problemas.push('registrou o que estava na fonte que não foi lida');
+  if (!(y.plugins ?? []).length || !(y.catalogos ?? []).length) problemas.push('o resto do registro devia seguir');
+  const restaurar = rodarAmb({ acao: 'restaurar', so_plano: true }, c, falsosAmb(), { limiteDeFonte: 4000 });
+  if (!(restaurar.avisos_de_leitura ?? []).some((x) => x.includes('.claude.json'))) problemas.push('o restaurar também devia avisar');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('yaml hostil (regressões que faltavam): quebra de linha em valor entre aspas, git@host: hostil, http:// e outros esquemas em catálogo git, e link simbólico para fora da sede', () => {
+  const { c, f } = paraMaquina(`
+catalogos:
+  - nome: q1
+    tipo: github
+    origem: "dono/repo\\nx"
+  - nome: q2
+    tipo: git
+    origem: "https://exemplo.invalid/a\\nb"
+  - nome: "q3\\nx"
+    tipo: github
+    origem: "dono/repo"
+  - nome: s1
+    tipo: git
+    origem: "git@host:../../x"
+  - nome: s2
+    tipo: git
+    origem: "git@host:-evil"
+  - nome: s3
+    tipo: git
+    origem: "git@-oProxyCommand=x:a/b"
+  - nome: s4
+    tipo: git
+    origem: "git@host:.oculto/x"
+  - nome: s5
+    tipo: git
+    origem: "git@ho st:a/b"
+  - nome: h1
+    tipo: git
+    origem: "http://exemplo.invalid/r.git"
+  - nome: h2
+    tipo: git
+    origem: "ftp://exemplo.invalid/r.git"
+  - nome: h3
+    tipo: git
+    origem: "ssh://git@exemplo.invalid/r.git"
+  - nome: h4
+    tipo: git
+    origem: "file:///etc/x"
+  - nome: l1
+    tipo: pasta_da_sede
+    origem: "atalho"
+  - nome: l2
+    tipo: pasta_da_sede
+    origem: "real"
+  - nome: ok
+    tipo: git
+    origem: "git@host:ok/repo.git"
+plugins:
+  - id: "a@b\\n--x"
+    versao: "1"`, falsosAmb());
+  mkdirSync(join(c.sede, 'real'), { recursive: true });
+  const fora = join(c.base, 'fora-da-sede');
+  mkdirSync(fora, { recursive: true });
+  let comLink = true;
+  try { juncao(fora, join(c.sede, 'atalho')); } catch { comLink = false; }
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) if (!p[`catalogo:entrada ${n}`]?.recusada) problemas.push(`a entrada ${n} do catálogo devia ser recusada: ${JSON.stringify(p[`catalogo:entrada ${n}`])}`);
+  if (!p['plugin:entrada 1']?.recusada) problemas.push('plugin com quebra de linha devia ser recusado');
+  if (comLink && !p['catalogo:entrada 13']?.recusada) problemas.push('o link simbólico para fora da sede devia ser recusado');
+  if (!p['catalogo:l2']?.comando?.endsWith(join(c.sede, 'real')) || p['catalogo:ok']?.comando !== 'claude plugin marketplace add -- git@host:ok/repo.git') problemas.push(`os bons devem passar: ${JSON.stringify([p['catalogo:l2']?.comando, p['catalogo:ok']?.comando])}`);
+  const adds = inesperadas(f).filter((x) => x.args.includes('add')).map((x) => x.args.join(' '));
+  if (adds.length !== 2 || adds.some((x) => /atalho|\n|ftp|http:|ssh:|file:|evil|oculto|Proxy/.test(x))) problemas.push(`executou: ${JSON.stringify(adds)}`);
+  if (r.estado !== 'restaurado') problemas.push(`estado ${r.estado}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ formato, varredura e script
+
+casoAmb('YAML mínimo: ida e volta de textos difíceis (dois-pontos, aspas, #, true, número, vazio, acento, listas de mapas)', () => {
+  const dado = {
+    versao: 1, texto: 'a: b', aspas: '"entre aspas"', jogo: '# não é comentário', verdadeiro: 'true', numero: '123', vazio: '', nulo: null, acento: 'ação · café',
+    barra: 'pasta\\sub\\x', lista: ['um', 'dois: três', ''], vazia: [], mapaVazio: {},
+    itens: [{ nome: 'a', valores: ['x', 'y'], interno: { chave: 'v' } }, { nome: 'b: c', ok: false, n: 2 }],
+    longa: Array.from({ length: 20 }, (_, i) => `linha número ${i} com texto comprido`),
+  };
+  const volta = lerYaml(emitirYaml(dado).join('\n'));
+  return JSON.stringify(volta) === JSON.stringify(dado) ? true : { ok: false, detalhe: `${JSON.stringify(volta).slice(0, 300)}` };
+});
+
+casoAmb('varredura: acha chave, ficha, JWT e URL com senha pelo caminho do campo e não acha caminho, versão nem nome comum', () => {
+  const achou = varrerAmb({ a: { b: [FICHA_FALSA], c: 'https://u:segredo-forte-123@x.invalid/y', d: ['eyJhbGciOi', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'abcDEF123456'].join('.')] } });
+  const limpo = varrerAmb({ origem: 'empresa-exemplo/catalogo', caminho: '${SEDE}/ferramentas/servidor.js', versao: 'b5b01ac4f889', id: 'intoca@sede-local', url: 'https://mcp.exemplo.invalid/mcp', argumentos: ['mcp', '--transport', 'stdio', '<definir>'] });
+  const problemas = [];
+  if (JSON.stringify(achou) !== JSON.stringify(['a.b[0]', 'a.c', 'a.d[1]'])) problemas.push(`achou ${JSON.stringify(achou)}`);
+  if (limpo.length !== 0) problemas.push(`falso positivo: ${JSON.stringify(limpo)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('script pela linha de comando: registrar com a pasta do Claude de mentira (CLAUDE_CONFIG_DIR) e restaurar --so-plano; nenhum sentinela sai', () => {
+  const c = cenarioAmb({ completo: true });
+  const saida = join(c.base, 'saida', 'ambiente.yaml');
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: c.claude, INTOCA_HOME: c.casa };
+  delete env.INTOCA_SEDE;
+  const roda = (...args) => spawnSync(process.execPath, [SCRIPT_AMBIENTE, ...args], { cwd: c.sede, env, encoding: 'utf8', timeout: TEMPO_LIMITE });
+  const previa = roda('registrar', `--saida=${saida}`);
+  const antes = existsSync(saida);
+  const grava = roda('registrar', `--saida=${saida}`, '--confirmado');
+  const plano = roda('restaurar', '--so-plano', `--arquivo=${saida}`);
+  const ruim = roda('inventar');
+  const lixo = roda('registrar', '--nao-existe');
+  const problemas = [];
+  const j = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+  if (previa.status !== 0 || j(previa)?.estado !== 'aguardando-confirmacao' || antes) problemas.push(`prévia: ${previa.status} ${previa.stderr.slice(0, 200)}`);
+  if (grava.status !== 0 || j(grava)?.estado !== 'gravado' || !existsSync(saida)) problemas.push(`gravar: ${grava.status} ${grava.stderr.slice(0, 200)} ${grava.stdout.slice(0, 200)}`);
+  if (plano.status !== 0 || !['plano', 'nada-a-fazer'].includes(j(plano)?.estado)) problemas.push(`plano: ${plano.status} ${plano.stderr.slice(0, 200)}`);
+  if (ruim.status !== 1 || j(ruim)?.erros?.[0]?.codigo !== 'acao-inexistente') problemas.push(`ação inexistente: ${ruim.status}`);
+  if (lixo.status !== 1 || j(lixo)?.erros?.[0]?.codigo !== 'argumento-desconhecido') problemas.push(`argumento: ${lixo.status}`);
+  const texto = existsSync(saida) ? readFileSync(saida, 'utf8') : '';
+  problemas.push(...vazamentos(texto, previa.stdout, grava.stdout, plano.stdout, previa.stderr, grava.stderr, plano.stderr).map((v) => `vazou ${v}`));
+  if (existsSync(arquivoAmb(c))) problemas.push('gravou na sede apesar do --saida');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('estático: o script só escreve o ambiente.yaml (sem cópia, sem remoção de arquivo, sem rede)', () => {
+  const t = lerPacote('scripts/ambiente.mjs');
+  const escritas = (t.match(/writeFileSync\(/g) ?? []).length;
+  const problemas = [];
+  if (escritas !== 2) problemas.push(`writeFileSync aparece ${escritas} vezes (esperava 2: o provisório do arquivo e o texto do gitleaks)`);
+  for (const proibido of ['copyFileSync', 'unlinkSync', 'fetch(', 'http.request', "from 'node:http", "from 'node:net'"]) if (t.includes(proibido)) problemas.push(`usa ${proibido}`);
+  if (/(?<![A-Za-z])[A-Za-z]:\\\\|\/Users\/|\/home\//.test(t.replace(/\/\^\/\(\?:home\|Users[^\n]*/g, ''))) problemas.push('cita caminho de máquina');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('pacote: skill e doc do ambiente, exemplo fictício da doc é válido e sem segredo, e a comecar avisa que o /intoca:ambiente existe', () => {
+  const skill = lerPacote('skills/ambiente/SKILL.md');
+  const doc = lerPacote('docs/ambiente.md');
+  const comecar = lerPacote('skills/comecar/SKILL.md');
+  const bloco = doc.match(/```yaml\n([\s\S]*?)\n```/)?.[1] ?? '';
+  const problemas = [];
+  for (const t of ['scripts/ambiente.mjs', 'registrar', 'restaurar', '--so-plano', '--confirmado', 'passos_da_pessoa', 'Nunca digite senha, token ou chave no chat']) if (!skill.includes(t) && !(t === 'passos_da_pessoa' && skill.includes('passos_da_pessoa'))) problemas.push(`skill sem "${t}"`);
+  if (skill.includes('diretoria/autorizacoes')) problemas.push('a skill não tem passo de produção: não cita autorização');
+  let y = null;
+  try { y = lerYaml(bloco); } catch (e) { problemas.push(`o exemplo da doc não é válido: ${e.message}`); }
+  if (y) {
+    if (y.versao !== 1 || !y.catalogos?.length || !y.plugins?.length || !y.servidores_mcp?.length || !y.hooks?.length || !y.ferramentas?.length || !y.permissoes || !y.passos_da_pessoa?.length) problemas.push('o exemplo não cobre todas as seções');
+    if (varrerAmb(y).length !== 0) problemas.push('a varredura acha segredo no exemplo da doc');
+    if (JSON.stringify(lerYaml(textoDoAmbiente(y))) !== JSON.stringify(y)) problemas.push('o exemplo não faz ida e volta');
+  }
+  if (!comecar.includes('`/intoca:ambiente`')) problemas.push('a comecar não avisa do /intoca:ambiente');
+  if (!skill.includes('confere a FORMA, não a confiança') || !doc.includes('confere a FORMA, não a confiança')) problemas.push('a skill e a doc têm de dizer que a validação confere a forma, não a confiança');
+  if (!/destaq/i.test(skill) || !/origem/.test(skill)) problemas.push('a skill tem de mandar destacar a origem nova de catálogo ou plugin');
+  if (/(?<![A-Za-z])[A-Za-z]:\\|\/Users\/|\/home\//.test(skill + doc)) problemas.push('caminho de máquina na skill ou na doc');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ PLG-36: as quatro ressalvas do revisor da PLG-34 (um caso por forma, nos dois lados)
+// Valores-sentinela: curto, só de letras e com `=` dentro. Nenhum pode aparecer no arquivo gravado nem na saída; o que é seguro fica intacto.
+
+const S_CURTO = 'zq7';
+const S_LETRAS = 'apenasletrassemnumero';
+const S_IGUAL = 'ab=cd=ef9';
+const SENTINELAS_PLG36 = [S_CURTO, S_LETRAS, S_IGUAL];
+const DEF = '<definir>';
+
+// Registra um servidor MCP de mentira com estes argumentos e devolve o que foi gravado.
+function registrarComArgumentos(args, comando = 'servidor-exemplo') {
+  const c = cenarioAmb({ completo: false });
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { estrutura: { command: comando, args } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const texto = existsSync(arquivoAmb(c)) ? lerAmb(c) : '';
+  const m = texto ? lerYaml(texto).servidores_mcp?.[0] : null;
+  return { c, r, texto, m };
+}
+function conferirArgumentos(args, esperado, { ajuste = true } = {}) {
+  const { r, texto, m } = registrarComArgumentos(args);
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  if (JSON.stringify(m?.argumentos) !== JSON.stringify(esperado)) problemas.push(`argumentos: ${JSON.stringify(m?.argumentos)}`);
+  if (m?.precisa_ajuste !== ajuste) problemas.push(`precisa_ajuste ${m?.precisa_ajuste}`);
+  const vazou = SENTINELAS_PLG36.filter((s) => texto.includes(s) || JSON.stringify(r).includes(s));
+  if (vazou.length) problemas.push(`vazou ${vazou.join(', ')}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+}
+
+casoAmb('PLG-36 (1a): opção de ambiente colada ao valor (-eNOME=v, -e=NOME=v, --env=NOME=v, -e NOME=v em minúsculas); só o nome fica, e o nome solto (-e NOME) também vira <definir>', () => conferirArgumentos(
+  [`-eNOME_A=${S_CURTO}`, `-e=NOME_B=${S_LETRAS}`, `--env=NOME_C=${S_IGUAL}`, '--env', `NOME_D=${S_CURTO}`, '-e', `nome_e=${S_IGUAL}`, `-eMisto_f=${S_LETRAS}`, '-eSO_NOME', '-e=OUTRO_NOME', '--env=NOME_G', '--env', 'NOME_H'],
+  ['-eNOME_A=' + DEF, '-e=NOME_B=' + DEF, '--env=NOME_C=' + DEF, '--env', 'NOME_D=' + DEF, '-e', 'nome_e=' + DEF, '-eMisto_f=' + DEF, '-e' + DEF, '-e=' + DEF, '--env=' + DEF, '--env', DEF],
+));
+
+casoAmb('PLG-36 (1b): cabeçalho colado à opção curta (-HNome:v, -H=Nome: v) e nas outras formas; só o nome do cabeçalho fica; "Nome: valor" solto também', () => conferirArgumentos(
+  [`-HAuthorization:${S_CURTO}`, `-HX-Api:${S_LETRAS}`, `-H=X-Key: ${S_IGUAL}`, '-H', `X-Outro: ${S_CURTO}`, '--header', `X-Dois:${S_LETRAS}`, `--header=X-Tres: ${S_IGUAL}`, `Authorization: Bearer ${S_CURTO}`, 'a:b', '--nome', 'ok'],
+  ['-HAuthorization: ' + DEF, '-HX-Api: ' + DEF, '-H=X-Key: ' + DEF, '-H', 'X-Outro: ' + DEF, '--header', 'X-Dois: ' + DEF, '--header=X-Tres: ' + DEF, 'Authorization: ' + DEF, 'a:b', '--nome', 'ok'],
+));
+
+casoAmb('PLG-36 (1c): nome=valor em minúsculas, misto ou fora de NOME_DE_VARIAVEL guarda só o nome; qualquer "=" que sobra esconde o argumento; o que não é atribuição fica intacto', () => conferirArgumentos(
+  [`api_key=${S_CURTO}`, `Senha=${S_LETRAS}`, `token=${S_IGUAL}`, `x=${S_CURTO}`, `Misto_Case9=${S_LETRAS}`, '--define', `chave=${S_IGUAL}`, `--opcao=nome=${S_CURTO}`, `algo,b=${S_CURTO}`, 'a:b', 'v1.2.3', '@pacote/x', '--nome=valor-comum', '--nome', 'ok', 'mcp'],
+  ['api_key=' + DEF, 'Senha=' + DEF, 'token=' + DEF, 'x=' + DEF, 'Misto_Case9=' + DEF, '--define', 'chave=' + DEF, '--opcao=nome=' + DEF, DEF, 'a:b', 'v1.2.3', '@pacote/x', '--nome=valor-comum', '--nome', 'ok', 'mcp'],
+));
+
+casoAmb('PLG-36 (1d): o argumento depois de opção curta ou de opção de nome não sensível é escondido (-p senha, -u user:pass, --db x, -pSENHA, -p=1234); depois de bandeira conhecida, de opção segura ou de recurso claro fica', () => conferirArgumentos(
+  ['-p', S_LETRAS, '-u', `user:${S_CURTO}`, '--db', `${S_CURTO}db`, `-p${S_CURTO}`, `-p=${S_LETRAS}`, `--user=${S_CURTO}`, '--host', S_LETRAS, '-p', '1234',
+    '-y', '-vv', '--verbose', 'pacote-comum', '--no-color', 'outro-pacote', '--port', '8080', '--transport=stdio', '--from', '@escopo/pacote', '--directory', '${SEDE}/ferramentas', '--db', 'https://exemplo.invalid/x', '-q'],
+  ['-p', DEF, '-u', DEF, '--db', DEF, '-p' + DEF, '-p=' + DEF, '--user=' + DEF, '--host', DEF, '-p', DEF,
+    '-y', '-vv', '--verbose', 'pacote-comum', '--no-color', 'outro-pacote', '--port', '8080', '--transport=stdio', '--from', '@escopo/pacote', '--directory', '${SEDE}/ferramentas', '--db', 'https://exemplo.invalid/x', '-q'],
+));
+
+casoAmb('PLG-36 (1e): JSON dentro de argumento fica só com as chaves (valores, arrays, aninhados), JSON quebrado some; o argumento sem JSON fica', () => conferirArgumentos(
+  [`--config={"token":"${S_LETRAS}","a":{"b":"${S_CURTO}","c":["${S_CURTO}",1,true,null]}}`, `{"k":"${S_LETRAS}"}`, '--cfg', `{"x":"${S_CURTO}"}`, `{"quebrado":"${S_CURTO}`, '--nome', 'ok', 'mcp'],
+  [`--config={"token":"${DEF}","a":{"b":"${DEF}","c":["${DEF}","${DEF}","${DEF}","${DEF}"]}}`, `{"k":"${DEF}"}`, '--cfg', `{"x":"${DEF}"}`, DEF, '--nome', 'ok', 'mcp'],
+));
+
+casoAmb('PLG-36 (1e): URL em argumento perde usuário, senha, parâmetros e âncora (inclusive depois de opção); esquema que não é http(s) e "?x=y" sem URL somem; URL limpa fica', () => conferirArgumentos(
+  [`https://h.invalid/p?token=${S_LETRAS}&x=1`, `--url=https://u:${S_CURTO}@h.invalid/p?y=${S_IGUAL}#f`, '--endpoint', `https://h.invalid/q?chave=${S_CURTO}`, `postgres://user:${S_LETRAS}@h.invalid/db`, `/p?token=${S_CURTO}`, 'https://exemplo.invalid/x/home', '--nome', 'ok'],
+  ['https://h.invalid/p', '--url=https://h.invalid/p', '--endpoint', 'https://h.invalid/q', DEF, '/p?token=' + DEF, 'https://exemplo.invalid/x/home', '--nome', 'ok'],
+));
+
+casoAmb('PLG-36 (1): todas as formas juntas, pela linha de comando com --saida: nenhum sentinela no arquivo, na saída padrão nem na de erro', () => {
+  const c = cenarioAmb({ completo: false });
+  const args = [`-eNOME_A=${S_CURTO}`, `-e=NOME_B=${S_LETRAS}`, `-HAuthorization:${S_CURTO}`, `-H=X-Key: ${S_IGUAL}`, `api_key=${S_CURTO}`, `Senha=${S_LETRAS}`, '-p', S_LETRAS, '-u', `user:${S_CURTO}`, '--db', `${S_CURTO}db`,
+    `--config={"token":"${S_LETRAS}"}`, `https://h.invalid/p?token=${S_LETRAS}&x=1`, `--chave=${S_IGUAL}`];
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { tudo: { command: 'servidor-exemplo', args, env: { CHAVE_DE_EXEMPLO: S_CURTO } } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const saida = join(c.base, 'saida36', 'ambiente.yaml');
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: c.claude, INTOCA_HOME: c.casa };
+  delete env.INTOCA_SEDE;
+  const roda = (...a) => spawnSync(process.execPath, [SCRIPT_AMBIENTE, ...a], { cwd: c.sede, env, encoding: 'utf8', timeout: TEMPO_LIMITE });
+  const previa = roda('registrar', `--saida=${saida}`);
+  const grava = roda('registrar', `--saida=${saida}`, '--confirmado');
+  const texto = existsSync(saida) ? readFileSync(saida, 'utf8') : '';
+  const problemas = [];
+  if (previa.status !== 0 || grava.status !== 0 || !texto) problemas.push(`registrar: ${previa.status}/${grava.status} ${grava.stderr.slice(0, 120)} ${grava.stdout.slice(0, 200)}`);
+  const vazou = SENTINELAS_PLG36.filter((v) => [texto, previa.stdout, previa.stderr, grava.stdout, grava.stderr].some((t) => t.includes(v)));
+  if (vazou.length) problemas.push(`vazou ${vazou.join(', ')}`);
+  const m = texto ? lerYaml(texto).servidores_mcp?.[0] : null;
+  if (!m || m.precisa_ajuste !== true || !m.argumentos?.every((a) => !SENTINELAS_PLG36.some((v) => a.includes(v)))) problemas.push(`argumentos: ${JSON.stringify(m?.argumentos)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (2): id de plugin com cara de chave (no nome ou no catálogo, até já instalado) é recusado por parte e sem eco; ＠ de largura total e letras parecidas são recusados; o id normal passa', () => {
+  const CHAVE = 'Ab1Cd2'.repeat(6);
+  const { c, f } = paraMaquina(`
+plugins:
+  - id: "${CHAVE}@catalogo-normal"
+    versao: "2.0.0"
+  - id: "plugin-normal@${CHAVE}"
+    versao: "1.0.0"
+  - id: "plugin-normal\\uff20catalogo-normal"
+    versao: "1.0.0"
+  - id: "plugin-n\\u043ermal@catalogo-normal"
+    versao: "1.0.0"
+  - id: "plugin-normal@catalogo-n\\u043ermal"
+    versao: "1.0.0"
+  - id: "plugin-normal@catalogo-normal"
+    versao: "1.0.0"`, falsosAmb());
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { [`${CHAVE}@catalogo-normal`]: [{ scope: 'user', version: '1.0.0' }] } });
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const r = restaurarConfirmado(c, f);
+  const problemas = [];
+  for (const n of [1, 2]) if (!p[`plugin:entrada ${n}`]?.recusada || !/chave ou um segredo/.test(p[`plugin:entrada ${n}`]?.motivo ?? '')) problemas.push(`a entrada ${n} devia ser recusada como chave: ${JSON.stringify(p[`plugin:entrada ${n}`])}`);
+  for (const n of [3, 4, 5]) if (!p[`plugin:entrada ${n}`]?.recusada || !/fora do padrão/.test(p[`plugin:entrada ${n}`]?.motivo ?? '')) problemas.push(`a entrada ${n} devia ser recusada pelo padrão: ${JSON.stringify(p[`plugin:entrada ${n}`])}`);
+  if (JSON.stringify(plano).includes(CHAVE) || JSON.stringify(r).includes(CHAVE)) problemas.push('a chave saiu na saída');
+  if ((plano.diferencas ?? []).length !== 0) problemas.push(`diferencas com id de chave: ${JSON.stringify(plano.diferencas)}`);
+  if (JSON.stringify(inesperadas(f).map((x) => x.args.join(' '))) !== JSON.stringify(['plugin install -- plugin-normal@catalogo-normal'])) problemas.push(`executou: ${JSON.stringify(inesperadas(f).map((x) => x.args.join(' ')))}`);
+  const frases = diferencasEntre({ plugins: [] }, { plugins: [{ id: `${CHAVE}@catalogo-normal`, versao: '1' }, { id: 'plugin-normal@catalogo-normal', versao: '1' }] });
+  if (frases.some((x) => x.includes(CHAVE)) || !frases.includes('novo plugin: (omitido: parecia um segredo)') || !frases.includes('novo plugin: plugin-normal@catalogo-normal')) problemas.push(`diferencasEntre: ${JSON.stringify(frases)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (2): registrar com id de plugin instalado que parece chave recusa gravar e diz só o nome do campo; id normal grava', () => {
+  const CHAVE = 'Ab1Cd2'.repeat(6);
+  const c = cenarioAmb({ completo: false });
+  const i = JSON.parse(readFileSync(join(c.claude, 'plugins', 'installed_plugins.json'), 'utf8'));
+  i.plugins[`${CHAVE}@catalogo-oficial`] = [{ scope: 'user', version: '1.0.0' }];
+  escreveJson(join(c.claude, 'plugins', 'installed_plugins.json'), i);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const ok = rodarAmb({ acao: 'registrar', confirmado: true }, cenarioAmb({ completo: false }), falsosAmb());
+  const problemas = [];
+  if (r.ok !== false || r.erros?.[0]?.codigo !== 'segredo-na-varredura' || !(r.erros?.[0]?.campos ?? []).some((x) => /^plugins\[\d+\]\.id$/.test(x))) problemas.push(`veio ${JSON.stringify(r).slice(0, 220)}`);
+  if (JSON.stringify(r).includes(CHAVE) || existsSync(arquivoAmb(c))) problemas.push('o valor saiu ou gravou mesmo assim');
+  if (!ok.ok || ok.estado !== 'gravado') problemas.push(`id normal: ${ok.estado}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (3): plugin registrado como desabilitado mostra o `plugin disable` inteiro no comando e no motivo do plano; o relato repete; o que roda é o que o plano mostrou; o habilitado não ganha disable', () => {
+  const { c, f } = paraMaquina(`
+plugins:
+  - id: ligado@cat1
+    versao: "1.0.0"
+    habilitado: true
+  - id: desligado@cat1
+    versao: "1.0.0"
+    habilitado: false`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const r = restaurarConfirmado(c, f);
+  const feitas = chamadasDoClaude(f);
+  const problemas = [];
+  if (p['plugin:desligado@cat1']?.comando !== 'claude plugin install -- desligado@cat1 && claude plugin disable -- desligado@cat1') problemas.push(`comando: ${JSON.stringify(p['plugin:desligado@cat1']?.comando)}`);
+  if (!/DESABILITA/.test(p['plugin:desligado@cat1']?.motivo ?? '') || !(p['plugin:desligado@cat1']?.motivo ?? '').includes('claude plugin disable -- desligado@cat1')) problemas.push(`motivo: ${JSON.stringify(p['plugin:desligado@cat1']?.motivo)}`);
+  if (p['plugin:ligado@cat1']?.comando !== 'claude plugin install -- ligado@cat1' || /disable|DESABILITA/i.test(p['plugin:ligado@cat1']?.motivo ?? '')) problemas.push(`o habilitado não devia ter disable: ${JSON.stringify(p['plugin:ligado@cat1'])}`);
+  if (JSON.stringify(plano).includes('exec_depois') || JSON.stringify(r.passos).includes('exec_depois')) problemas.push('o campo interno exec_depois vazou para a saída');
+  if (JSON.stringify(feitas) !== JSON.stringify(['plugin install -- ligado@cat1', 'plugin install -- desligado@cat1', 'plugin disable -- desligado@cat1'])) problemas.push(`executou: ${JSON.stringify(feitas)}`);
+  const relato = (r.executados ?? []).find((x) => x.alvo === 'desligado@cat1' && x.comando);
+  if (!relato || relato.estado !== 'feito' || relato.comando !== 'claude plugin disable -- desligado@cat1' || !relato.saida.includes('claude plugin disable -- desligado@cat1')) problemas.push(`relato: ${JSON.stringify(r.executados)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (3): o arquivo muda entre --so-plano e --confirmado (só o habilitado do plugin): o hash mostrado não executa o plano novo, e o plano novo tem hash diferente', () => {
+  const c = maquinaVazia(yamlHostil('plugins:\n  - id: x@cat1\n    versao: "1.0.0"\n    habilitado: true'));
+  const f = falsosAmb();
+  const mostrado = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  writeFileSync(arquivoAmb(c), yamlHostil('plugins:\n  - id: x@cat1\n    versao: "1.0.0"\n    habilitado: false'));
+  const recusado = rodarAmb({ acao: 'restaurar', confirmado: true, plano: mostrado.plano_hash }, c, f);
+  const novo = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const problemas = [];
+  if (!mostrado.plano_hash || !novo.plano_hash || mostrado.plano_hash === novo.plano_hash) problemas.push('o hash não mudou com o disable');
+  if (recusado.ok !== false || recusado.erros?.[0]?.codigo !== 'plano-mudou' || algumaChamadaDeEscrita(f)) problemas.push(`o hash velho executou: ${JSON.stringify(recusado).slice(0, 160)}`);
+  const bom = rodarAmb({ acao: 'restaurar', confirmado: true, plano: novo.plano_hash }, c, f);
+  if (!bom.ok || !claudeChamou(f, 'plugin', 'disable')) problemas.push(`o hash novo devia executar (com o disable): ${bom.estado}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (4): --saida e --arquivo só aceitam um ambiente.yaml; outro nome, arquivo da sede, pasta com esse nome e link para fora são recusados e nada é tocado', () => {
+  const c = cenarioAmb({ completo: false });
+  const agents = join(c.sede, 'AGENTS.md');
+  writeFileSync(agents, 'REGIMENTO-DE-MENTIRA');
+  mkdirSync(join(c.sede, 'pasta', 'ambiente.yaml'), { recursive: true });
+  const f = () => falsosAmb();
+  const recusado = (r) => r.ok === false && r.erros?.[0]?.codigo === 'caminho-nao-permitido';
+  const problemas = [];
+  const casos = [
+    ['saida = AGENTS.md da sede', { acao: 'registrar', confirmado: true, saida: agents }],
+    ['saida com outro nome na sede', { acao: 'registrar', confirmado: true, saida: join(c.sede, 'diretoria', 'outro.yaml') }],
+    ['saida ambiente.yml', { acao: 'registrar', confirmado: true, saida: join(c.base, 'x', 'ambiente.yml') }],
+    ['saida ambiente.yaml.bak', { acao: 'registrar', confirmado: true, saida: join(c.base, 'x', 'ambiente.yaml.bak') }],
+    ['saida vazia', { acao: 'registrar', confirmado: true, saida: '' }],
+    ['saida é uma pasta chamada ambiente.yaml', { acao: 'registrar', confirmado: true, saida: join(c.sede, 'pasta', 'ambiente.yaml') }],
+    ['arquivo = AGENTS.md', { acao: 'restaurar', so_plano: true, arquivo: agents }],
+    ['arquivo com outro nome', { acao: 'restaurar', so_plano: true, arquivo: join(c.sede, 'sede.yaml') }],
+    ['arquivo é uma pasta chamada ambiente.yaml', { acao: 'restaurar', so_plano: true, arquivo: join(c.sede, 'pasta', 'ambiente.yaml') }],
+  ];
+  for (const [rotulo, entrada] of casos) { const r = rodarAmb(entrada, c, f()); if (!recusado(r)) problemas.push(`${rotulo}: ${JSON.stringify(r).slice(0, 140)}`); }
+  if (readFileSync(agents, 'utf8') !== 'REGIMENTO-DE-MENTIRA' || existsSync(join(c.sede, 'diretoria', 'outro.yaml')) || existsSync(join(c.base, 'x'))) problemas.push('alguma coisa foi tocada');
+  // link de pasta (junção) para fora da sede e da pasta temporária: o caminho real decide
+  // PLG-37 (6): o "fora" não depende de onde o pacote mora: é outra pasta temporária, criada pelo próprio teste. Regra (decidida na PLG-37): um caminho ESCRITO dentro da sede tem de
+  // continuar na sede depois de resolver os links (junção da sede para a pasta temporária também é recusada); um escrito na pasta temporária fica na temporária.
+  const fora = mkdtempSync(join(tmpdir(), 'intoca-fora-'));
+  let comLink = true;
+  try { juncao(fora, join(c.sede, 'atalho-fora')); } catch { comLink = false; }
+  if (comLink) {
+    const r = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(c.sede, 'atalho-fora', 'ambiente.yaml') }, c, f());
+    if (!recusado(r)) problemas.push(`junção da sede para fora (outra pasta temporária): ${JSON.stringify(r).slice(0, 140)}`);
+    if (existsSync(join(fora, 'ambiente.yaml'))) { problemas.push('gravou pela junção'); rmSync(join(fora, 'ambiente.yaml'), { force: true }); }
+    // lado bom: junção feita na própria pasta temporária, para outra pasta temporária, é aceita
+    let comLinkTmp = true;
+    try { juncao(fora, join(c.base, 'atalho-tmp')); } catch { comLinkTmp = false; }
+    if (comLinkTmp) {
+      const ok = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(c.base, 'atalho-tmp', 'ambiente.yaml') }, c, f());
+      if (!ok.ok || !existsSync(join(fora, 'ambiente.yaml'))) problemas.push(`junção temporária → temporária devia valer: ${JSON.stringify(ok).slice(0, 140)}`);
+    }
+    // junção na temporária para um lugar que não é a temporária: recusada (só quando o pacote mora fora dela, para ter um "fora" real sem inventar caminho de máquina)
+    const alem = join(PACOTE, 'templates');
+    const rtmp = realpathSync.native(tmpdir()).toLowerCase();
+    if (!realpathSync.native(alem).toLowerCase().startsWith(rtmp)) {
+      let comLinkAlem = true;
+      try { juncao(alem, join(c.base, 'atalho-alem')); } catch { comLinkAlem = false; }
+      if (comLinkAlem) {
+        const r2 = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(c.base, 'atalho-alem', 'ambiente.yaml') }, c, f());
+        if (!recusado(r2)) problemas.push(`junção da temporária para fora da temporária: ${JSON.stringify(r2).slice(0, 140)}`);
+        if (existsSync(join(alem, 'ambiente.yaml'))) { problemas.push('gravou além da temporária'); rmSync(join(alem, 'ambiente.yaml'), { force: true }); }
+      }
+    }
+  }
+  try { rmSync(fora, { recursive: true, force: true }); } catch { /* a junção sai com a pasta de teste */ }
+  // o lado bom: um ambiente.yaml novo, dentro da pasta temporária, e o de sempre na sede
+  const bom = join(c.base, 'pasta-boa', 'ambiente.yaml');
+  const g = rodarAmb({ acao: 'registrar', confirmado: true, saida: bom }, c, f());
+  const l = rodarAmb({ acao: 'restaurar', so_plano: true, arquivo: bom }, c, f());
+  const naSede = rodarAmb({ acao: 'registrar', confirmado: true }, c, f());
+  if (!g.ok || !existsSync(bom) || !l.ok || !['plano', 'nada-a-fazer'].includes(l.estado) || !naSede.ok || !existsSync(arquivoAmb(c))) problemas.push(`o lado bom falhou: ${JSON.stringify([g.ok, l.estado, naSede.ok])}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 (4): o arquivo provisório da gravação nunca segue nem escreve num link (físico ou simbólico) deixado no nome dele; ambiente.yaml que é link para outro arquivo da sede é recusado', () => {
+  const problemas = [];
+  const MARCA = 'REGIMENTO-DE-MENTIRA';
+  const comAgents = () => { const c = cenarioAmb({ completo: false }); const agents = join(c.sede, 'AGENTS.md'); writeFileSync(agents, MARCA); return { c, agents, provisorio: `${arquivoAmb(c)}.intoca-novo` }; };
+  const confere = (rotulo, c, agents) => {
+    const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+    if (!r.ok || r.estado !== 'gravado' || lstatSync(arquivoAmb(c)).isSymbolicLink() || !lerAmb(c).includes('versao: 1')) problemas.push(`${rotulo}: ${JSON.stringify(r).slice(0, 160)}`);
+    if (readFileSync(agents, 'utf8') !== MARCA) problemas.push(`${rotulo}: o AGENTS.md foi sobrescrito`);
+  };
+  // link físico no nome do provisório (não precisa de privilégio): escrever "por cima" mudaria o AGENTS.md
+  const a = comAgents();
+  linkSync(a.agents, a.provisorio);
+  confere('link físico no provisório', a.c, a.agents);
+  // sobra de uma gravação interrompida (arquivo comum no nome do provisório): não atrapalha
+  const b = comAgents();
+  writeFileSync(b.provisorio, 'sobra');
+  confere('provisório que sobrou', b.c, b.agents);
+  // links simbólicos de arquivo, onde o sistema deixa criar (no Windows, só com privilégio)
+  const s = comAgents();
+  let simbolico = true;
+  try { symlinkSync(s.agents, arquivoAmb(s.c), 'file'); } catch { simbolico = false; }
+  if (simbolico) {
+    const r = rodarAmb({ acao: 'registrar', confirmado: true }, s.c, falsosAmb());
+    const l = rodarAmb({ acao: 'restaurar', so_plano: true }, s.c, falsosAmb());
+    if (r.ok !== false || r.erros?.[0]?.codigo !== 'caminho-nao-permitido' || l.ok !== false || l.erros?.[0]?.codigo !== 'caminho-nao-permitido') problemas.push(`ambiente.yaml link: ${JSON.stringify([r.erros?.[0]?.codigo, l.erros?.[0]?.codigo])}`);
+    if (readFileSync(s.agents, 'utf8') !== MARCA) problemas.push('o AGENTS.md foi sobrescrito pelo link do ambiente.yaml');
+    rmSync(arquivoAmb(s.c), { force: true });
+    try { symlinkSync(s.agents, s.provisorio, 'file'); confere('link simbólico no provisório', s.c, s.agents); } catch { /* sem privilégio */ }
+  }
+  if (problemas.length) return { ok: false, detalhe: problemas.join(' | ') };
+  return simbolico ? true : { ok: true, aviso: 'PULADO: o sistema não deixou criar link simbólico de arquivo (no Windows, só com privilégio): o caso do ambiente.yaml que é link e o do provisório simbólico não rodaram; o do link físico e a junção de pasta (PLG-36 R3 b) rodaram no lugar' };
+});
+
+// ------------------------------ PLG-36, segunda rodada (revisão independente): `--`, opções que não começam por letra, linha de comando inteira, falha do `disable`
+
+casoAmb('PLG-36 R2 (1): depois de `--` as opções continuam sendo lidas (-- --token x, -- -p senha, -- -pabc, -- -u user:pass, -- --db x); o que é seguro fica', () => conferirArgumentos(
+  ['--', '--token', S_LETRAS, '-p', S_CURTO, `-p${S_CURTO}`, '-u', `user:${S_CURTO}`, '--db', `${S_CURTO}db`, `--chave=${S_IGUAL}`, '--nome', 'ok', '-y', 'pacote-comum', '@pacote/x'],
+  // PLG-38: `-pabc` (um traço, mais de uma letra, sem `=`) é ambíguo (valor colado ou nome longo): vira `-p<definir>` e o argumento seguinte (`-u`) também é lido como valor; `user:x` vem depois, ainda lido pelo estado
+  ['--', '--token', DEF, '-p', DEF, '-p' + DEF, DEF, DEF, '--db', DEF, '--chave=' + DEF, '--nome', 'ok', '-y', 'pacote-comum', '@pacote/x'],
+));
+
+casoAmb('PLG-36 R2 (2): opção que começa com dígito, `_` ou letra não ASCII, e o estilo Windows (/password x, /p:x, /pass=x, /u x), também escondem o valor; o resto fica', () => conferirArgumentos(
+  ['--2fa', S_CURTO, '--_token', S_LETRAS, '--ação', S_CURTO, `-9${S_CURTO}`, `-é${S_LETRAS}`, '-7', S_CURTO, '/password', S_LETRAS, `/p:${S_CURTO}`, `/pass=${S_IGUAL}`, '/u', S_LETRAS, '--nome', 'ok', '-y', '@pacote/x', 'v1.2.3'],
+  // PLG-38: `-9x` e `-éx` são ambíguos (um traço, mais de uma letra): `-9<definir>` e o argumento seguinte, mesmo com cara de opção, é o valor; `-7` e o seguinte também ficam escondidos
+  ['--2fa', DEF, '--_token', DEF, '--ação', DEF, '-9' + DEF, DEF, DEF, DEF, '/password', DEF, '/p:' + DEF, '/pass=' + DEF, '/u', DEF, '--nome', 'ok', '-y', '@pacote/x', 'v1.2.3'],
+));
+
+casoAmb('PLG-36 R2 (3): command com a linha de comando inteira e argumento solto com espaço (inclusive "--token x" num argumento só e URL com espaço na frente) são escondidos; chave:valor sensível solta guarda só a chave', () => {
+  const { r, texto, m } = registrarComArgumentos([`--token ${S_CURTO}`, `abc ${S_LETRAS}`, ` https://h.invalid/hooks/${S_CURTO}`, `-p ${S_CURTO}`, `/password ${S_LETRAS}`, `token:${S_CURTO}`, `password:${S_LETRAS}`, `X-Api-Key:${S_CURTO}`, 'a:b', 'v1.2.3'], `servidor-exemplo --token ${S_LETRAS}`);
+  const esperado = [DEF, DEF, DEF, '-p' + DEF, DEF, 'token:' + DEF, 'password:' + DEF, 'X-Api-Key:' + DEF, 'a:b', 'v1.2.3'];
+  const problemas = [];
+  if (!r.ok) problemas.push(`não registrou: ${JSON.stringify(r.erros).slice(0, 200)}`);
+  if (m?.comando !== DEF) problemas.push(`comando: ${JSON.stringify(m?.comando)}`);
+  if (JSON.stringify(m?.argumentos) !== JSON.stringify(esperado)) problemas.push(`argumentos: ${JSON.stringify(m?.argumentos)}`);
+  if (m?.precisa_ajuste !== true) problemas.push('devia pedir ajuste');
+  const vazou = SENTINELAS_PLG36.filter((v) => texto.includes(v) || JSON.stringify(r).includes(v));
+  if (vazou.length) problemas.push(`vazou ${vazou.join(', ')}`);
+  // o lado bom: command simples (sem espaço) fica
+  const bom = registrarComArgumentos(['mcp'], 'servidor-exemplo');
+  if (bom.m?.comando !== 'servidor-exemplo' || bom.m?.precisa_ajuste !== false) problemas.push(`command simples: ${JSON.stringify([bom.m?.comando, bom.m?.precisa_ajuste])}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 R2 (4 e 5): o limite que o código não cobre está dito na doc, na skill e no CHANGELOG (user:pass e X-Api:y soltos, trecho de URL de menos de 24 caracteres, palavra solta)', () => {
+  const doc = lerPacote('docs/ambiente.md');
+  const skill = lerPacote('skills/ambiente/SKILL.md');
+  const log = lerPacote('CHANGELOG.md');
+  const seguimento = log.slice(log.indexOf('## [1.2.1]'), log.indexOf('## [1.2.0]'));
+  const problemas = [];
+  for (const [nome, t] of [['doc', doc], ['skill', skill], ['CHANGELOG 1.2.1', seguimento]]) {
+    for (const trecho of ['user:pass', 'X-Api:y', 'https://h/hooks/abc123', '24 caracteres', '`--`']) if (!t.includes(trecho)) problemas.push(`${nome} não diz "${trecho}"`);
+  }
+  if (/trecho de caminho com cara de chave numa URL \|/.test(doc) && !/24 caracteres/.test(doc)) problemas.push('a tabela da doc promete o trecho de caminho sem o limite');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 R2 (6): se o `plugin disable` falha, a execução PARA no passo, o estado é "falhou", ok é falso, há erro com código e o que sobrou volta em `restante`', () => {
+  const { c, f } = paraMaquina(`
+plugins:
+  - id: desligado@cat1
+    versao: "1.0.0"
+    habilitado: false
+  - id: depois@cat1
+    versao: "1.0.0"
+    habilitado: true`, falsosAmb({ falhaEm: 'plugin disable' }));
+  const r = restaurarConfirmado(c, f);
+  const feitas = chamadasDoClaude(f);
+  const problemas = [];
+  if (r.ok !== false || r.estado !== 'falhou' || r.erros?.[0]?.codigo !== 'passo-falhou') problemas.push(`estado ${r.ok} ${r.estado} ${JSON.stringify(r.erros)}`);
+  if (!r.parou || !/desabilitar/.test(r.parou.motivo ?? '')) problemas.push(`parou: ${JSON.stringify(r.parou)}`);
+  const e = r.executados ?? [];
+  if (e.length !== 2 || e[0].estado !== 'feito' || e[1].estado !== 'falhou' || e[1].comando !== 'claude plugin disable -- desligado@cat1') problemas.push(`executados: ${JSON.stringify(e)}`);
+  if (!(r.restante ?? []).some((x) => x.alvo === 'depois@cat1')) problemas.push(`restante: ${JSON.stringify((r.restante ?? []).map((x) => x.alvo))}`);
+  if (feitas.some((x) => x.includes('depois@cat1'))) problemas.push(`executou o passo seguinte: ${JSON.stringify(feitas)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ PLG-36, terceira rodada (pós-integração): valor que parece opção, texto que promete menos, preview do que vai gravar, limites do id de plugin
+
+casoAmb('PLG-36 R3 (1): com o estado ligado, o argumento seguinte É o valor, mesmo que pareça opção (--token --abc, -p /segredo, -p -abc, -e --x, -H -x); depois de uma palavra o estado desliga e bandeira e opção segura voltam ao normal', () => conferirArgumentos(
+  ['--token', `--${S_LETRAS}`, '-p', `/${S_LETRAS}x`, '-p', `-${S_CURTO}`, '-e', `--${S_CURTO}`, '-H', `-${S_CURTO}`, '/password', `-${S_LETRAS}`,
+    'pacote-um', '-y', 'pacote', '--transport', 'stdio', '--port', '8080', '--nome', 'ok'],
+  ['--token', DEF, '-p', DEF, '-p', DEF, '-e', DEF, '-H', DEF, '/password', DEF,
+    DEF, '-y', 'pacote', '--transport', 'stdio', '--port', '8080', '--nome', 'ok'],
+));
+
+casoAmb('PLG-36 R3 (1): as formas já cobertas não regridem (valor colado, com =, depois de --, JSON, URL, nome=valor) e a opção segura com valor comum continua intacta', () => conferirArgumentos(
+  [`-p-${S_CURTO}`, `--token=--${S_LETRAS}`, '--', '--token', `--${S_CURTO}`, `-eNOME_A=${S_CURTO}`, `-HAuthorization:${S_CURTO}`, `api_key=${S_CURTO}`, `--config={"k":"${S_LETRAS}"}`, `https://h.invalid/p?token=${S_LETRAS}`, '--nome', 'meu-servidor', '--directory', '${SEDE}/x'],
+  ['-p' + DEF, '--token=' + DEF, '--', '--token', DEF, '-eNOME_A=' + DEF, '-HAuthorization: ' + DEF, 'api_key=' + DEF, `--config={"k":"${DEF}"}`, 'https://h.invalid/p', '--nome', 'meu-servidor', '--directory', '${SEDE}/x'],
+));
+
+casoAmb('PLG-36 R3 (2): o registrar sem --confirmado devolve o texto que vai gravar (texto_a_gravar), igual ao que é gravado depois; o limite que o código não cobre está completo na doc, na skill e no CHANGELOG, e a skill manda mostrá-lo antes do "sim"', () => {
+  const c = cenarioAmb({ completo: false });
+  const s = JSON.parse(readFileSync(join(c.claude, 'settings.json'), 'utf8'));
+  s.mcpServers = { estrutura: { command: 'servidor-exemplo', args: ['-y', 'palavra-solta', '--token', `--${S_LETRAS}`] } };
+  escreveJson(join(c.claude, 'settings.json'), s);
+  const previa = rodarAmb({ acao: 'registrar' }, c, falsosAmb());
+  const antes = existsSync(arquivoAmb(c));
+  rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+  const problemas = [];
+  if (previa.estado !== 'aguardando-confirmacao' || typeof previa.texto_a_gravar !== 'string' || previa.texto_a_gravar !== lerAmb(c)) problemas.push('o texto_a_gravar da prévia não é o do arquivo gravado');
+  if (antes) problemas.push('gravou antes do sim');
+  if (!previa.texto_a_gravar?.includes('palavra-solta')) problemas.push('a prévia devia mostrar o que é copiado (palavra solta), para a pessoa ver');
+  if (SENTINELAS_PLG36.some((v) => String(previa.texto_a_gravar).includes(v))) problemas.push('a prévia tem sentinela');
+  const doc = lerPacote('docs/ambiente.md');
+  const skill = lerPacote('skills/ambiente/SKILL.md');
+  const log = lerPacote('CHANGELOG.md');
+  const r3 = log.slice(log.indexOf('## [1.2.2]'), log.indexOf('## [1.2.1]'));
+  for (const [nome, t] of [['doc', doc], ['skill', skill], ['CHANGELOG 1.2.2', r3]]) {
+    for (const trecho of ['`--stdio`', '`--no-*`', 'vírgula', 'user:pass', 'X-Api:y', 'https://h/hooks/abc123', '24 caracteres', 'mesmo que pareça opção', '`--port x`', '`--foo --bar`', 'perde o nome']) if (!t.includes(trecho)) problemas.push(`${nome} não diz "${trecho}"`);
+  }
+  if (!/Limite:\*\*/.test(doc.split('\n').find((l) => l.startsWith('| `servidores_mcp`')) ?? '')) problemas.push('a tabela "o que nunca guarda" da doc não repete o limite');
+  if (!skill.includes('texto_a_gravar') || !skill.includes('antes de pedir o "sim"')) problemas.push('a skill não manda mostrar o que vai gravar antes do sim');
+  if (/depois de qualquer opção que não seja uma bandeira conhecida[^.]*o valor também vira/.test(skill + doc)) problemas.push('o texto ainda promete "depois de qualquer opção o valor vira <definir>" sem a regra do argumento seguinte');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 R3 (c): id de plugin no limite (100 caracteres no nome e no catálogo, 101 recusado), pontos seguidos recusados, e chave com pontos no meio (nome ou catálogo) recusada como chave', () => {
+  const nome100 = `a${'b'.repeat(99)}`;
+  const comPontos = 'Ab1.Cd2.Ef3.'.repeat(4);
+  const { c, f } = paraMaquina(`
+plugins:
+  - id: "${nome100}@${nome100}"
+    versao: "1.0.0"
+  - id: "${nome100}b@catalogo"
+    versao: "1.0.0"
+  - id: "catalogo@${nome100}b"
+    versao: "1.0.0"
+  - id: "a..b@catalogo"
+    versao: "1.0.0"
+  - id: "nome@cat..alogo"
+    versao: "1.0.0"
+  - id: "${comPontos}@catalogo"
+    versao: "1.0.0"
+  - id: "nome@${comPontos}"
+    versao: "1.0.0"
+  - id: "nome.com.pontos@catalogo.com.pontos"
+    versao: "1.0.0"
+  - id: "com.empresa.produto.plugin.integracao.versao2@catalogo.oficial.da.empresa.exemplo"
+    versao: "1.0.0"`, falsosAmb());
+  const plano = rodarAmb({ acao: 'restaurar', so_plano: true }, c, f);
+  const p = passosDe(plano);
+  const problemas = [];
+  if (p[`plugin:${nome100}@${nome100}`]?.recusada !== false) problemas.push('o id de 100 + 100 caracteres devia passar');
+  if (p['plugin:nome.com.pontos@catalogo.com.pontos']?.recusada !== false) problemas.push('o id comum com pontos devia passar');
+  if (p['plugin:com.empresa.produto.plugin.integracao.versao2@catalogo.oficial.da.empresa.exemplo']?.recusada !== false) problemas.push('o id legítimo, longo e só em minúsculas, com pontos, devia passar');
+  for (const n of [2, 3, 4, 5]) if (!p[`plugin:entrada ${n}`]?.recusada || !/fora do padrão/.test(p[`plugin:entrada ${n}`]?.motivo ?? '')) problemas.push(`a entrada ${n} devia ser recusada pelo padrão: ${JSON.stringify(p[`plugin:entrada ${n}`])}`);
+  for (const n of [6, 7]) if (!p[`plugin:entrada ${n}`]?.recusada || !/chave ou um segredo/.test(p[`plugin:entrada ${n}`]?.motivo ?? '')) problemas.push(`a entrada ${n} devia ser recusada como chave: ${JSON.stringify(p[`plugin:entrada ${n}`])}`);
+  if (JSON.stringify(plano).includes(comPontos)) problemas.push('a chave com pontos saiu na saída');
+  // o registrar também olha o id por parte, sem os pontos
+  const k = cenarioAmb({ completo: false });
+  const i = JSON.parse(readFileSync(join(k.claude, 'plugins', 'installed_plugins.json'), 'utf8'));
+  i.plugins[`${comPontos}@catalogo-oficial`] = [{ scope: 'user', version: '1.0.0' }];
+  escreveJson(join(k.claude, 'plugins', 'installed_plugins.json'), i);
+  const r = rodarAmb({ acao: 'registrar', confirmado: true }, k, falsosAmb());
+  if (r.ok !== false || r.erros?.[0]?.codigo !== 'segredo-na-varredura' || existsSync(arquivoAmb(k)) || JSON.stringify(r).includes(comPontos)) problemas.push(`registrar com chave com pontos: ${JSON.stringify(r).slice(0, 160)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-36 R3 (b): o destino de sempre (<sede>/diretoria) que é junção para fora da sede é recusado (equivalente do link de arquivo, que não se cria sem privilégio) e nada é gravado do outro lado', () => {
+  const c = cenarioAmb({ completo: false });
+  const fora = mkdtempSync(join(tmpdir(), 'intoca-fora-')); // PLG-37 (6): outra pasta temporária, não a do pacote
+  const sobra = join(fora, 'ambiente.yaml');
+  let ok = true;
+  try { rmSync(join(c.sede, 'diretoria'), { recursive: true, force: true }); juncao(fora, join(c.sede, 'diretoria')); } catch { ok = false; }
+  const problemas = [];
+  if (ok) {
+    const r = rodarAmb({ acao: 'registrar', confirmado: true }, c, falsosAmb());
+    const l = rodarAmb({ acao: 'restaurar', so_plano: true }, c, falsosAmb());
+    if (r.ok !== false || r.erros?.[0]?.codigo !== 'caminho-nao-permitido' || l.ok !== false || l.erros?.[0]?.codigo !== 'caminho-nao-permitido') problemas.push(`junção para fora: ${JSON.stringify([r.erros?.[0]?.codigo, l.erros?.[0]?.codigo])}`);
+    if (existsSync(sobra)) { problemas.push('gravou do outro lado da junção'); rmSync(sobra, { force: true }); }
+  }
+  try { rmSync(join(c.sede, 'diretoria'), { recursive: true, force: true }); } catch { /* a junção sai com a pasta de teste */ }
+  try { rmSync(fora, { recursive: true, force: true }); } catch { /* idem */ }
+  if (problemas.length) return { ok: false, detalhe: problemas.join(' | ') };
+  return ok ? true : { ok: true, aviso: 'PULADO: não consegui criar a junção ou a pasta de fora da sede neste sistema' };
+});
+
+// ------------------------------ PLG-36, quarta rodada (pós-integração): máquina de estados, não lista de formatos
+
+casoAmb('PLG-36 R4 (1): as quatro reproduções do parecer (--headless --api-key x, --port --token x, -password x, --token= x) não vazam e as opções sensíveis ficam visíveis; --foo --bar perde o nome de --bar (perda aceita e documentada)', () => conferirArgumentos(
+  ['-y', 'pkg', '--headless', '--api-key', S_LETRAS, '--port', '--token', S_CURTO, '-password', S_IGUAL, '--token=', S_LETRAS, '--foo', '--bar'],
+  ['-y', 'pkg', '--headless', '--api-key', DEF, '--port', '--token', DEF, '-password', DEF, '--token=', DEF, '--foo', DEF],
+));
+
+casoAmb('PLG-36 R4 (2): depois de uma opção estrita que consumiu um argumento com cara de opção como valor, o seguinte ainda é lido pelo estado (nunca solto, em claro); -p e -password atuam como opção de senha', () => conferirArgumentos(
+  ['--token', `--${S_LETRAS}`, S_CURTO, '-p', `-${S_CURTO}`, S_LETRAS, '-password', `--${S_LETRAS}`, S_CURTO, `-password=${S_CURTO}`, '-y', 'pacote'],
+  ['--token', DEF, DEF, '-p', DEF, DEF, '-password', DEF, DEF, '-password=' + DEF, '-y', 'pacote'],
+));
+
+casoAmb('PLG-36 R4 (3): o nome solto depois de -e e o valor depois de -H sem dois-pontos também viram <definir> (na dúvida, esconde); -e NOME=v guarda só o nome da variável', () => {
+  const r = argumentosDoMcp(['-e', 'NOME_A', '-H', 'SEGREDO1', '-e', 'SEGREDO2=x'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  return JSON.stringify(r) === JSON.stringify(['-e', DEF, '-H', DEF, '-e', 'SEGREDO2=' + DEF]) ? true : { ok: false, detalhe: JSON.stringify(r) };
+});
+
+casoAmb('PLG-36 R4 (propriedade) + PLG-37 + PLG-38 + PLG-39 + PLG-40 (cadeia): TODAS as sequências de 1 a 4 argumentos de 34 tokens, as de 1 a 4 de 23 tokens de nomes (camelCase, colado, `--x:y`, vazio, com espaço, URL com usuário, `S﹫host`, `@a/b@S`) e as de 5 de 15 tokens críticos passam pela máquina de estados: `--` e não-texto (5, null, {}), formas coladas (-eX=v, -HX:v, --x=v), opção fora da lista (--foo, --webhook, --pat), URL limpa, o limite --token-ABC123, o valor invisível (largura zero, NUL) e as formas comuns de servidor MCP (`mcp-remote@latest`, `@escopo/pacote@1.2.3`, `img@sha256:…`)', () => {
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: CONFIG_CADEIA });
+  const esperado = [ALFABETO.length, ALFABETO_NOMES.length].reduce((t, n) => t + n + n ** 2 + n ** 3 + n ** 4, 0) + ALFABETO_CRITICO.length ** 5;
+  return r.falhas.length === 0 && r.sequencias === esperado ? { ok: true, aviso: r.aviso } : { ok: false, detalhe: `${r.sequencias} de ${esperado}: ${r.falhas.join(' | ')}` };
+});
+
+casoAmb('PLG-38 (5) + PLG-39 (5) + PLG-40 (propriedade independente): o oráculo que não repete a máquina de estados roda todas as sequências de 1 a 4 de 43 tokens (base64 com = e == com espaço e quebra de linha, `S＠host`, `S﹫host`, `＠a/b＠S`, `git＠h:S`, `@a/b@S`, valor invisível, as formas comuns de servidor MCP e as `S=1`, que são o limite conhecido) e passa', () => {
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: CONFIG_INDEPENDENTE_PRINCIPAL });
+  const n = ALFABETO_INDEPENDENTE.length;
+  const esperado = n + n ** 2 + n ** 3 + n ** 4;
+  return r.falhas.length === 0 && r.sequencias === esperado ? { ok: true, aviso: r.aviso } : { ok: false, detalhe: `${r.sequencias} de ${esperado}: ${r.falhas.join(' | ')}` };
+});
+
+casoAmb('PLG-38 (5) + PLG-39 (5) + PLG-40 (propriedade independente, tokens críticos): todas as sequências de 5 de 19 tokens críticos (inclusive vazio, só espaço, largura zero e NUL no meio) passam', () => {
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: CONFIG_INDEPENDENTE_CRITICA });
+  const esperado = ALFABETO_INDEPENDENTE_CRITICO.length ** 5;
+  return r.falhas.length === 0 && r.sequencias === esperado ? { ok: true, aviso: r.aviso } : { ok: false, detalhe: `${r.sequencias} de ${esperado}: ${r.falhas.join(' | ')}` };
+});
+
+casoAmb('PLG-37 (1) e (2): `--` e argumento que não é texto depois de uma opção que espera valor são o valor (viram <definir>) e o estado continua ligado: o segredo seguinte não sai; sem estado ligado o `--` passa e o não-texto vira <definir> sem ligar nada', () => conferirArgumentos(
+  ['--api-key', '--', S_LETRAS, '-y', '--token', 5, S_CURTO, '-y', 'pkg', '--', 'cmd'],
+  ['--api-key', DEF, DEF, '-y', '--token', DEF, DEF, '-y', 'pkg', '--', 'cmd'],
+));
+
+casoAmb('PLG-37 (1) e (2) (cadeias): vários `--` e não-textos seguidos, e `--port --` (opção segura): o estado continua ligado; depois do primeiro valor da opção segura nada mais é copiado solto', () => conferirArgumentos(
+  ['--password', '--', '--', null, {}, S_LETRAS, '--port', 5, S_CURTO, '--port', '--', S_IGUAL, '-e', 5, 'NOME_X=y', '-H', '--', S_CURTO],
+  ['--password', DEF, DEF, DEF, DEF, DEF, '--port', DEF, DEF, '--port', DEF, 'ab=' + DEF, '-e', DEF, 'NOME_X=' + DEF, '-H', DEF, DEF],
+));
+
+casoAmb('PLG-37 (4): --pat, --dsn, --sas, --jwt, --connection-string, --webhook (e a forma colada em maiúsculas) escondem até a URL limpa; o que não é segredo (--patch, --passo, --design, --spin, --pinned) continua com a URL limpa copiada: palavra inteira, nos dois lados', () => {
+  const urls = ['abcdEF0123', 'ghijKL4567', 'mnopQR8901', 'stuvWX2345', 'yzabCD6789', 'efghIJ0123', 'klmnOP4567', 'qrstUV8901'];
+  const nomes = ['--webhook', '--pat', '--dsn', '--sas', '--jwt', '--connection-string', '--connectionString', '--webhookUrl'];
+  const lado1 = registrarComArgumentos(nomes.flatMap((n, i) => [n, `https://h.io/hooks/${urls[i]}`]));
+  const problemas = [];
+  const dado = JSON.stringify(lado1.m?.argumentos);
+  if (dado !== JSON.stringify(nomes.flatMap((n) => [n, DEF]))) problemas.push(`sensíveis: ${dado}`);
+  const vazou = urls.filter((u) => lado1.texto.includes(u) || JSON.stringify(lado1.r).includes(u));
+  if (vazou.length) problemas.push(`vazou ${vazou.join(', ')}`);
+  const comuns = ['--patch', '--passo', '--design', '--spin', '--pinned'];
+  const lado2 = registrarComArgumentos(comuns.flatMap((n, i) => [n, `https://h.io/limpa/${i}`]));
+  const esperado = comuns.flatMap((n, i) => [n, `https://h.io/limpa/${i}`]);
+  if (JSON.stringify(lado2.m?.argumentos) !== JSON.stringify(esperado)) problemas.push(`comuns: ${JSON.stringify(lado2.m?.argumentos)}`);
+  // as outras palavras da lista, em forma de opção, com valor curto que não é URL (sentinela): nenhuma sai
+  const mais = ['--signature', '--sig', '--bearer', '--apikey', '--private', '--credential', '--cert', '--session', '--cookie', '--otp', '--pin', '--salt'];
+  const l3 = registrarComArgumentos(mais.flatMap((n) => [n, 'https://h.io/hooks/zzzzYYYY99']));
+  if (JSON.stringify(l3.m?.argumentos) !== JSON.stringify(mais.flatMap((n) => [n, DEF])) || l3.texto.includes('zzzzYYYY99')) problemas.push(`outras palavras: ${JSON.stringify(l3.m?.argumentos)}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-37 (3): LIMITE CONHECIDO e documentado: `--api-key --token-ABC123` fica visível (a segunda é lida como nova opção sensível); a doc, a skill e o CHANGELOG dizem isso', () => {
+  const r = conferirArgumentos(['--api-key', '--token-ABC123'], ['--api-key', '--token-ABC123'], { ajuste: false });
+  if (r !== true) return r;
+  const problemas = [];
+  const doc = lerPacote('docs/ambiente.md').replace(/\s+/g, ' ');
+  const skill = lerPacote('skills/ambiente/SKILL.md').replace(/\s+/g, ' ');
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  for (const [nome, t] of [['doc', doc], ['skill', skill], ['CHANGELOG', log.slice(log.indexOf('## [1.2.4]'), log.indexOf('## [1.2.3]'))]]) if (!t.includes('--api-key --token-')) problemas.push(`${nome} não cita o limite --api-key --token-...`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ PLG-37, segunda rodada
+
+casoAmb('PLG-37 R2 (1): `--nome:valor` (dois-pontos, `@`, `/` no nome da opção longa) é valor colado: o argumento INTEIRO vira <definir> (--token:x, --password:x, --user:x@host, --https://u:p@h/db); com uma opção segura na frente também; --nome=ok e --url=https://h/p seguem como antes', () => {
+  const r1 = conferirArgumentos(
+    [`--token:${S_CURTO}`, `--password:${S_LETRAS}`, `--user:${S_CURTO}@host`, `--https://u:${S_LETRAS}@h/db`],
+    [DEF, DEF, DEF, DEF],
+  );
+  if (r1 !== true) return r1;
+  const r2 = conferirArgumentos(['--port', `--user:${S_CURTO}@host`, S_LETRAS, '-p', `--token:${S_CURTO}`, S_LETRAS], ['--port', DEF, DEF, '-p', DEF, DEF]);
+  if (r2 !== true) return r2;
+  const lado = registrarComArgumentos(['--nome=ok', '--url=https://h/p', '--port', '3000']);
+  return JSON.stringify(lado.m?.argumentos) === JSON.stringify(['--nome=ok', '--url=https://h/p', '--port', '3000']) ? true : { ok: false, detalhe: `lado bom: ${JSON.stringify(lado.m?.argumentos)}` };
+});
+
+casoAmb('PLG-37 R2 (2): nomes colados em minúsculas e comuns (--webhookurl, --mywebhook, --slackwebhook, --mypat, --mydsn, --githubpat, --dsnurl) escondem o valor mesmo sendo URL limpa de caminho curto; --patch, --passo, --design, --compat, --sassy seguem copiados; o limite (nome colado fora da lista, --zzpat) está documentado na doc, na skill e no CHANGELOG', () => {
+  const problemas = [];
+  const nomes = ['--webhookurl', '--mywebhook', '--slackwebhook', '--mypat', '--mydsn', '--githubpat', '--dsnurl'];
+  const l1 = registrarComArgumentos(nomes.flatMap((n) => [n, 'https://h.io/hooks/abc']));
+  if (JSON.stringify(l1.m?.argumentos) !== JSON.stringify(nomes.flatMap((n) => [n, DEF])) || l1.texto.includes('hooks/abc')) problemas.push(`colados: ${JSON.stringify(l1.m?.argumentos)}`);
+  const comuns = ['--patch', '--passo', '--design', '--compat', '--sassy'];
+  const l2 = registrarComArgumentos(comuns.flatMap((n, i) => [n, `https://h.io/limpa/${i}`]));
+  if (JSON.stringify(l2.m?.argumentos) !== JSON.stringify(comuns.flatMap((n, i) => [n, `https://h.io/limpa/${i}`]))) problemas.push(`comuns: ${JSON.stringify(l2.m?.argumentos)}`);
+  const l3 = registrarComArgumentos(['--zzpat', 'https://h.io/hooks/abc']); // o limite: fora da lista, a URL limpa é copiada
+  if (JSON.stringify(l3.m?.argumentos) !== JSON.stringify(['--zzpat', 'https://h.io/hooks/abc'])) problemas.push(`limite --zzpat: ${JSON.stringify(l3.m?.argumentos)}`);
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  const textos = [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.4]'), log.indexOf('## [1.2.3]'))]];
+  for (const [nome, t] of textos) if (!t.replace(/\s+/g, ' ').includes('nome colado em minúsculas')) problemas.push(`${nome} não diz que nome colado em minúsculas fora da lista não é pego`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-37 R2 (3): caminho escrito FORA da sede e da pasta temporária é recusado se passa por link ou junção (antes entrava pela junção para a temporária); e o inverso roda sempre, qualquer que seja o lugar da sede: escrito na temporária, a junção que cai na sede é recusada', () => {
+  const c = cenarioAmb();
+  const f = () => falsosAmb();
+  const recusado = (r) => r.ok === false && r.erros?.[0]?.codigo === 'caminho-nao-permitido';
+  const problemas = [];
+  const temp2 = mkdtempSync(join(tmpdir(), 'intoca-temp2-')); // vira a "pasta temporária" do processo durante este teste (c.base e c.sede ficam FORA dela)
+  const guarda = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR };
+  const troca = (v) => { for (const k of Object.keys(guarda)) { if (v === undefined) { if (guarda[k] === undefined) delete process.env[k]; else process.env[k] = guarda[k]; } else process.env[k] = v; } };
+  const sedeTinha = existsSync(join(c.sede, 'diretoria', 'ambiente.yaml'));
+  let comLink = true;
+  try { juncao(temp2, join(c.base, 'ponte-de-fora')); juncao(join(c.sede, 'diretoria'), join(temp2, 'ponte-para-sede')); } catch { comLink = false; }
+  if (comLink) {
+    troca(temp2);
+    try {
+      // (a) fora da sede e da temporária (temp2), por junção que cai na temporária: recusado
+      const a = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(c.base, 'ponte-de-fora', 'ambiente.yaml') }, c, f());
+      if (!recusado(a)) problemas.push(`junção de fora para a temporária: ${JSON.stringify(a).slice(0, 140)}`);
+      if (existsSync(join(temp2, 'ambiente.yaml'))) { problemas.push('gravou pela junção de fora'); rmSync(join(temp2, 'ambiente.yaml'), { force: true }); }
+      // (b) o inverso: escrito na temporária (temp2), a junção cai na sede (fora da temporária): recusado
+      const b = rodarAmb({ acao: 'registrar', confirmado: true, saida: join(temp2, 'ponte-para-sede', 'ambiente.yaml') }, c, f());
+      if (!recusado(b)) problemas.push(`junção da temporária que cai na sede: ${JSON.stringify(b).slice(0, 140)}`);
+      if (existsSync(join(c.sede, 'diretoria', 'ambiente.yaml')) !== sedeTinha) problemas.push('gravou na sede pela junção');
+    } finally { troca(undefined); }
+  }
+  try { rmSync(temp2, { recursive: true, force: true }); } catch { /* a junção sai com a pasta */ }
+  if (problemas.length) return { ok: false, detalhe: problemas.join(' | ') };
+  return comLink ? true : { ok: true, aviso: 'PULADO: não consegui criar a junção neste sistema' };
+});
+
+casoAmb('PLG-37 R2 (4): a propriedade tem alfabeto de nomes (camelCase, colado, --patch, `--x:y`, string vazia, com espaço, URL com usuário) e regras que não repetem a máquina de estados: o argumento com segredo dentro nunca o deixa sair e o sentinela logo depois de nome sensível ou estranho nunca sai', () => {
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: [{ alfabeto: ['--apiKey', '--PAT', `--token:${SENT1_PROP}`, `--user:${SENT1_PROP}@host`, `https://u:${SENT1_PROP}@h/db`, '', 'a b', SENT1_PROP, '--foo', '-p'], ate: 3 }] });
+  return r.falhas.length === 0 && r.sequencias === 10 + 100 + 1000 ? true : { ok: false, detalhe: `${r.sequencias} ${r.falhas.join(' | ')}` };
+});
+
+
+// ------------------------------ PLG-38, terceiro seguimento: opção de um traço, URL sem esquema, valor vazio, texto do limite e propriedade independente
+
+casoAmb('PLG-38 (1): opção de UM traço com nome longo (-accesskey x, -apitoken x, -vp x, -accesskey=x): o valor e o argumento seguinte não saem; agrupamentos de bandeiras (-vv, -vvv, -yv) seguem como bandeira e não ligam o estado; -Xmx2g (falso positivo aceito) esconde também o seguinte', () => {
+  const problemas = [];
+  const confere = (rotulo, entrada, esperado, opcoes) => { const r = conferirArgumentos(entrada, esperado, opcoes); if (r !== true) problemas.push(`${rotulo}: ${r.detalhe}`); };
+  confere('-accesskey', ['-accesskey', S_CURTO, 'pkg'], ['-accesskey', DEF, 'pkg']);
+  confere('-apitoken', ['-apitoken', S_LETRAS, '-y'], ['-apitoken', DEF, '-y']);
+  confere('-vp', ['-vp', S_CURTO, 'pkg'], ['-v' + DEF, DEF, 'pkg']);
+  confere('-accesskey=', [`-accesskey=${S_IGUAL}`, 'pkg'], ['-accesskey=' + DEF, 'pkg']);
+  confere('-apitoken=', [`-apitoken=${S_CURTO}`, `-api-key=${S_LETRAS}`], ['-apitoken=' + DEF, '-api-key=' + DEF]);
+  confere('-Xmx2g', ['-Xmx2g', 'pkg'], ['-X' + DEF, DEF]);
+  confere('-pS', [`-p${S_CURTO}`, S_LETRAS, 'pkg'], ['-p' + DEF, DEF, 'pkg']);
+  confere('-passphrase (nome conhecido, sem sobra)', ['-passphrase', S_CURTO, 'pkg'], ['-passphrase', DEF, 'pkg']);
+  confere('-accessKey (maiúscula: o nome se perde)', ['-accessKey', S_CURTO, 'pkg'], ['-a' + DEF, DEF, 'pkg']);
+  confere('agrupamentos', ['-vvv', '-yv', 'pkg', '-vv', 'outro'], ['-vvv', '-yv', 'pkg', '-vv', 'outro'], { ajuste: false }); // palavra solta depois de bandeira conhecida: copiada (limite dito)
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 (2): URL sem esquema (//usuario:x＠host/db com ＠ de largura total e com @) e usuario:x@host sem esquema somem por inteiro; //host/caminho limpo e git@host:org/repo seguem', () => {
+  const r1 = conferirArgumentos([`//usuario:${S_LETRAS}＠host/db`, `//usuario:${S_CURTO}@host/db`, `usuario:${S_LETRAS}@host`, `usuario:${S_CURTO}＠host`, `//h.io/x?k=${S_CURTO}`], [DEF, DEF, DEF, DEF, '//h.io/x']);
+  if (r1 !== true) return r1;
+  return conferirArgumentos(['//h.io/limpa', 'git@host.io:org/repo.git', '@escopo/pacote'], ['//h.io/limpa', 'git@host.io:org/repo.git', '@escopo/pacote'], { ajuste: false });
+});
+
+casoAmb('PLG-38 (3): a string vazia depois de opção que espera valor é o valor (<definir>) e o estado continua ligado; sem estado ela fica como está', () => {
+  const r1 = conferirArgumentos(['--api-key', '', S_CURTO, 'pkg'], ['--api-key', DEF, DEF, 'pkg']);
+  if (r1 !== true) return r1;
+  const r2 = conferirArgumentos(['--token', '', '', '--', S_LETRAS, '-y'], ['--token', DEF, DEF, DEF, DEF, '-y']);
+  if (r2 !== true) return r2;
+  const r3 = conferirArgumentos(['-y', '', 'pkg'], ['-y', '', 'pkg'], { ajuste: false });
+  if (r3 !== true) return r3;
+  return conferirArgumentos(['--port', '', S_CURTO], ['--port', DEF, DEF]);
+});
+
+casoAmb('PLG-38 (4): o limite vale para QUALQUER opção que espera valor (--foo --token-ABC123 também); a doc, a skill e o CHANGELOG dizem isso, o código faz isso, e a 1.2.4 (histórico) aponta para a 1.2.5', () => {
+  const r = conferirArgumentos(['--foo', '--token-ABC123', '-p', '--password-ABC123'], ['--foo', '--token-ABC123', '-p', '--password-ABC123'], { ajuste: false });
+  if (r !== true) return r;
+  const problemas = [];
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  const textos = [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.5]'), log.indexOf('## [1.2.4]'))]];
+  for (const [nome, t] of textos) {
+    const x = t.replace(/\s+/g, ' ').toLowerCase();
+    if (!x.includes('qualquer opção que espera valor')) problemas.push(`${nome} não diz "qualquer opção que espera valor"`);
+    if (!x.includes('--foo --token-abc123')) problemas.push(`${nome} não cita --foo --token-ABC123`);
+  }
+  const e124 = log.slice(log.indexOf('## [1.2.4]'), log.indexOf('## [1.2.3]'));
+  if (!e124.includes('ver 1.2.5')) problemas.push('a entrada 1.2.4 não aponta para a 1.2.5');
+  for (const [nome, t] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')]]) {
+    const x = t.replace(/\s+/g, ' ');
+    for (const frase of ['`-accesskey x`', '`-vp x`', '`-Xmx2g`', 'falso positivo aceito', 'string vazia', '`//usuario:x@host/db`']) if (!x.includes(frase)) problemas.push(`${nome} não diz ${frase}`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 (5), PLG-39 (5) e PLG-40: a camada independente REPROVA mascaradores que vazam (cópia pura, o código que só lê duas letras, o que não esconde `//u:p＠h`, o que ignora o valor vazio, o que liga o estado num agrupamento; da PLG-39: a atribuição antiga com base64, o que ignora o valor só de espaço, o que copia `token＠host`, o que põe `//S` em minúsculas; da PLG-40: o que não apara o base64, o que ignora o valor invisível, o que copia `S﹫host` e `@escopo/nome@S`, e o que esconde o pacote com versão) e a própria 1.2.6 inteira', () => {
+  const independentes = [...CONFIG_INDEPENDENTE_PRINCIPAL, ...CONFIG_INDEPENDENTE_CRITICA, ...CONFIG_VERSAO.filter((c) => c.independente), ...CONFIG_INVISIVEL.filter((c) => c.independente)];
+  const problemas = [];
+  // mascaradores defeituosos: cada um tem de ser reprovado pela camada independente
+  const copia = (args) => args.map((a) => (typeof a === 'string' ? a : DEF));
+  const real = (args) => argumentosDoMcp(args, '/sede-falsa', '/casa-falsa', { ajuste: false });
+  // 1.2.4: o argumento depois de `-accesskey`, `-apitoken`, `-vp` (um traço, mais de duas letras que não são bandeiras agrupadas) passava em claro
+  const duasLetras = (args) => real(args).map((x, i) => (i > 0 && typeof args[i - 1] === 'string' && /^-[a-z]{2,}$/.test(args[i - 1]) && !/^-(?:vv+|yv)$/.test(args[i - 1]) ? args[i] : x));
+  // 1.2.4: `//u:p＠h` e `u:p@h` eram copiados
+  const semUrl = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /^(?:[/][/].*[@＠]|[a-z]+:[A-Za-z0-9]+[@＠])/.test(args[i]) ? args[i] : x));
+  // 1.2.4: a string vazia zerava o estado: o argumento depois dela passava em claro
+  const semVazio = (args) => real(args).map((x, i) => (i > 0 && args[i - 1] === '' ? args[i] : x));
+  // um agrupamento de bandeiras tratado como `-y<definir>`
+  const ligaNoGrupo = (args) => real(args).map((x, i) => (args[i] === '-yv' ? '-y' + DEF : x));
+  // 1.2.5 (PLG-39): a regra da atribuição tomava o base64 inteiro por nome (`QWx…ZQ=<definir>`), o valor só de espaço não era valor, `token＠host` solto era copiado e a limpeza da URL sem esquema punha o texto em minúsculas
+  const atribuicaoAntiga = (args) => real(args).map((x, i) => { const m = typeof args[i] === 'string' ? args[i].match(/^((?:-k|--foo=)?)([A-Za-z0-9]+=)=*$/) : null; return m ? m[1] + m[2] + DEF : x; });
+  const semBranco = (args) => real(args).map((x, i) => (i > 0 && typeof args[i - 1] === 'string' && /^[ \t]+$/.test(args[i - 1]) ? args[i] : x));
+  const copiaArrobaLarga = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /＠/.test(args[i]) && !/:/.test(args[i]) ? args[i] : x));
+  const minusculas = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /^\/\/[A-Za-z0-9]+$/.test(args[i]) ? args[i].toLowerCase() : x));
+  // 1.2.6 (PLG-40): o base64 seguido de espaço ou quebra de linha saía `QWx…ZQ=<definir>` (o valor não era aparado); o valor invisível não era valor; `﹫` e `@escopo/nome@S` eram copiados; o pacote com versão sumia
+  const semAparar = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /^[A-Za-z0-9]+==\s+$/.test(args[i]) ? args[i].replace(/\s+$/, '').slice(0, -1) + DEF : x));
+  const semInvisivel = (args) => real(args).map((x, i) => (i > 0 && (args[i - 1] === ZW_PROP || args[i - 1] === NUL_PROP) ? args[i] : x));
+  const copiaArrobaParecida = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /﹫|^@[a-z]+\/[a-z]+@/.test(args[i]) ? args[i] : x));
+  // seguimento da 1.2.7: o sufixo livre depois de `-` ou `+` (`pkg@1.2.3-S`), o digest com qualquer comprimento de hexadecimal e o invisível que só conta largura zero e NUL (sem as categorias Z, Cc e Cf inteiras)
+  const sufixoLivre = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /^(?:@[a-z]+[/])?[a-z]+@v?[0-9][0-9.]*[-+][A-Za-z0-9_.+-]+$/.test(args[i]) ? args[i] : x));
+  const digestCurto = (args) => real(args).map((x, i) => (typeof args[i] === 'string' && /^[a-z]+@sha(?:1|256|384|512):[0-9a-f]{6,128}$/.test(args[i]) ? args[i] : x));
+  const soZwENul = (args) => real(args).map((x, i) => (i > 0 && typeof args[i - 1] === 'string' && /^[^A-Za-z0-9\s]$/u.test(args[i - 1]) && ![ZW_PROP, NUL_PROP].includes(args[i - 1]) ? args[i] : x));
+  const escondePacote = (args) => real(args).map((x, i) => (args[i] === COMUM_PKG || args[i] === DIGEST_PKG ? DEF : x));
+  for (const [nome, f] of [['cópia pura', copia], ['só duas letras', duasLetras], ['sem tratar //u:p＠h', semUrl], ['sem tratar o valor vazio', semVazio], ['liga no agrupamento', ligaNoGrupo], ['atribuição antiga (base64)', atribuicaoAntiga], ['sem tratar só-espaço', semBranco], ['copia token＠host', copiaArrobaLarga], ['//S em minúsculas', minusculas],
+    ['base64 sem aparar', semAparar], ['sem tratar o valor invisível', semInvisivel], ['copia S﹫host e @escopo/nome@S', copiaArrobaParecida], ['esconde o pacote com versão', escondePacote], ['sufixo livre depois de - ou +', sufixoLivre], ['digest com hexadecimal curto', digestCurto], ['invisível só de largura zero e NUL', soZwENul], ['a 1.2.6 inteira', argumentosDaReferencia126]]) {
+    const r = propriedadeDeArgumentos(f, { configuracoes: independentes, maxFalhas: 3 });
+    if (r.falhas.length === 0) problemas.push(`a camada independente NÃO reprovou o mascarador "${nome}"`);
+  }
+  // a 1.2.6 também é reprovada por CADA camada, sozinha (a cadeia e a independente: nenhuma depende da outra)
+  for (const [nome, c] of [['cadeia', CONFIG_CADEIA], ['independente principal', CONFIG_INDEPENDENTE_PRINCIPAL], ['independente crítica', CONFIG_INDEPENDENTE_CRITICA]]) {
+    if (propriedadeDeArgumentos(argumentosDaReferencia126, { configuracoes: c, maxFalhas: 3 }).falhas.length === 0) problemas.push(`a camada "${nome}" não reprovou a 1.2.6`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 R2 (1): opção de um traço ambígua que TERMINA em = ou : vazios (-AccessKey=, -vp=, -accessKey:, -x:, -x=) deixa o valor para o argumento seguinte, que é escondido', () => {
+  const problemas = [];
+  const confere = (rotulo, entrada, esperado) => { const r = conferirArgumentos(entrada, esperado); if (r !== true) problemas.push(`${rotulo}: ${r.detalhe}`); };
+  confere('-AccessKey=', ['-AccessKey=', S_CURTO, 'pkg'], ['-A' + DEF, DEF, 'pkg']);
+  confere('-vp= (PLG-39: o argumento ambíguo que termina em = some inteiro, como o base64 com preenchimento)', ['-vp=', S_CURTO, 'pkg'], ['-v' + DEF, DEF, 'pkg']);
+  confere('-accessKey:', ['-accessKey:', S_LETRAS, 'pkg'], ['-a' + DEF, DEF, 'pkg']);
+  confere('-x=', ['-x=', S_CURTO, 'pkg'], ['-x=', DEF, 'pkg']);
+  confere('-x:', ['-x:', S_CURTO, 'pkg'], ['-x' + DEF, DEF, 'pkg']);
+  confere('-accesskey= (nome conhecido)', ['-accesskey=', S_CURTO, 'pkg'], ['-accesskey=', DEF, 'pkg']);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 R2 (2): o nome só fica visível quando é EXATAMENTE um nome conhecido, sem letra sobrando: -p<nome>=v e -k<nome>=1 escondem o nome e o valor; -accesskey=x, -apitoken=x, -passphrase x e -secret-key x mantêm o nome; -Dfoo=bar e -eNOME=v seguem como antes', () => {
+  const problemas = [];
+  const confere = (rotulo, entrada, esperado) => { const r = conferirArgumentos(entrada, esperado); if (r !== true) problemas.push(`${rotulo}: ${r.detalhe}`); };
+  confere('-p<nome>=v', [`-p${S_LETRAS}=${S_CURTO}`, 'pkg'], ['-p' + DEF, 'pkg']);
+  confere('-k<nome sensível>=1', [`-ksecret${S_LETRAS}=1`, 'pkg'], ['-k' + DEF, 'pkg']);
+  confere('-p<nome> sem =', [`-p${S_LETRAS}`, S_CURTO, 'pkg'], ['-p' + DEF, DEF, 'pkg']);
+  confere('nomes conhecidos', ['-accesskey=x', '-apitoken=x', '-passphrase', S_CURTO, '-secret-key', S_LETRAS, 'pkg'], ['-accesskey=' + DEF, '-apitoken=' + DEF, '-passphrase', DEF, '-secret-key', DEF, 'pkg']);
+  confere('antes como estava', ['-Dfoo=bar', `-eNOME=${S_CURTO}`, 'pkg'], ['-Dfoo=' + DEF, '-eNOME=' + DEF, 'pkg']);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 R2 (3 e 4): o texto diz o limite de //SEGREDO sem @ depois de opção desconhecida (lido como host, pode sair copiado) e de traço parecido (−token, –token) ou espaço no começo (palavra solta); o código faz isso', () => {
+  const r = conferirArgumentos(['--foo', '//s3cr3t', '−token', 'abc9', ' --token', 'abc8'], ['--foo', DEF, '−token', 'abc9', DEF, 'abc8']); // PLG-39: `//s3cr3t` (sem ponto no host) agora some
+  if (r !== true) return r;
+  const problemas = [];
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  const textos = [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.5]'), log.indexOf('## [1.2.4]'))]];
+  for (const [nome, tx] of textos) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['//SEGREDO', '//s3cr3t', '−token', '–token', 'espaço no começo', 'palavra solta']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ------------------------------ PLG-39, quarto seguimento: base64 com `=`, valor só com espaço, `token＠host` solto, `//SEGREDO` sem alterar o texto, expressão linear e propriedade mais dura
+// Sentinelas SEM palavra sensível (para que o argumento não suma pelo nome); o base64 é montado por partes (o exemplo clássico de Basic Auth da documentação).
+const B64_PLG39 = 'QWxhZGRpbjpv' + 'cGVuIHNlc2FtZQ==';
+const FRAGMENTOS_PLG39 = ['QWxhZGRp', 'IHNlc2FtZQ', 'ZQXWV9', 'Zq7Wv9', 'c0ffee'];
+function semFragmentos(args, esperado, opcoes) {
+  const r = conferirArgumentos(args, esperado, opcoes);
+  if (r !== true) return r;
+  const { r: reg, texto } = registrarComArgumentos(args);
+  const vazou = FRAGMENTOS_PLG39.filter((f) => [texto, JSON.stringify(reg)].some((t) => t.toLowerCase().includes(f.toLowerCase())));
+  return vazou.length === 0 ? true : { ok: false, detalhe: `vazou ${vazou.join(', ')}` };
+}
+
+casoAmb('PLG-39 (1): valor com `=` no fim (base64 com preenchimento) some POR INTEIRO em toda forma: solto, valor de opção, `--foo=`, `-k` colado, `-e`, `Zq7Wv9=`; nome comprido e `NOME=` vazio também somem (falso positivo aceito); nome curto com valor segue como antes', () => {
+  const problemas = [];
+  const confere = (rotulo, entrada, esperado, opcoes) => { const r = semFragmentos(entrada, esperado, opcoes); if (r !== true) problemas.push(`${rotulo}: ${r.detalhe}`); };
+  confere('--foo B64', ['--foo', B64_PLG39, 'pkg'], ['--foo', DEF, 'pkg']);
+  confere('-kB64', [`-k${B64_PLG39}`, 'pkg'], ['-k' + DEF, DEF]);
+  confere('-pB64', [`-p${B64_PLG39}`, 'pkg'], ['-p' + DEF, DEF]);
+  confere('B64 solto', [B64_PLG39, 'pkg'], [DEF, 'pkg']);
+  confere('--foo=B64', [`--foo=${B64_PLG39}`, 'pkg'], ['--foo=' + DEF, 'pkg']);
+  confere('--api-key B64', ['--api-key', B64_PLG39, 'pkg'], ['--api-key', DEF, 'pkg']);
+  confere('-e B64 e -eB64', ['-e', B64_PLG39, `-e${B64_PLG39}`, 'pkg'], ['-e', DEF, '-e' + DEF, DEF]);
+  confere('um = só', ['Zq7Wv9=', '-kZq7Wv9=', 'pkg'], [DEF, '-k' + DEF, DEF]);
+  confere('nome comprido e NOME= vazio', [`${'A'.repeat(33)}=x`, 'NOME=', 'pkg'], [DEF, DEF, 'pkg']);
+  confere('nome de 32 caracteres e nomes comuns', [`${'A'.repeat(32)}=x`, 'api_key=x', 'a.b-c=d', 'pkg'], [`${'A'.repeat(32)}=${DEF}`, 'api_key=' + DEF, 'a.b-c=' + DEF, 'pkg']);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-39 (2): com o estado ligado, a string só de espaço, tabulação, quebra de linha ou espaço de largura total é o valor (<definir>) e o estado continua ligado; sem estado ligado, como estava', () => {
+  const problemas = [];
+  const confere = (rotulo, entrada, esperado) => { const r = conferirArgumentos(entrada, esperado); if (r !== true) problemas.push(`${rotulo}: ${r.detalhe}`); };
+  for (const [rotulo, branco] of [['espaço', ' '], ['tabulação', '\t'], ['quebra de linha', '\n'], ['largura total', '　'], ['vários', ' \t\n']]) {
+    confere(`--api-key + ${rotulo}`, ['--api-key', branco, S_CURTO, 'pkg'], ['--api-key', DEF, DEF, 'pkg']);
+  }
+  confere('opção desconhecida', ['--foo', ' ', S_LETRAS, 'pkg'], ['--foo', DEF, DEF, 'pkg']);
+  confere('-p', ['-p', '\t', S_CURTO, 'pkg'], ['-p', DEF, DEF, 'pkg']);
+  confere('-e', ['-e', ' ', S_CURTO, 'pkg'], ['-e', DEF, DEF, 'pkg']);
+  confere('com vazio no meio', ['--api-key', '', ' ', S_CURTO, 'pkg'], ['--api-key', DEF, DEF, DEF, 'pkg']);
+  confere('sem estado ligado (como estava)', ['-y', ' ', 'pkg', '\t'], ['-y', DEF, 'pkg', DEF]);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-39 (3): `token＠github.com/org/repo`, `token@host/caminho`, `S@host` e e-mail soltos somem; `git@host:org/repo`, `@escopo/pacote` e `@escopo/pacote@1.2.3` seguem como estão', () => {
+  const problemas = [];
+  const r1 = semFragmentos(['token＠github.com/org/repo', 'token@github.com/org/repo', 'ZQXWV9＠host', 'ZQXWV9@host', 'ana@exemplo.invalid', '＠x'], [DEF, DEF, DEF, DEF, DEF, DEF]);
+  if (r1 !== true) problemas.push(`somem: ${r1.detalhe}`);
+  const r2 = conferirArgumentos(['git@github.com:org/repo.git', '@escopo/pacote', '@escopo/pacote@1.2.3', 'v1.2.3', '@nome'], ['git@github.com:org/repo.git', '@escopo/pacote', '@escopo/pacote@1.2.3', 'v1.2.3', '@nome'], { ajuste: false });
+  if (r2 !== true) problemas.push(`seguem: ${r2.detalhe}`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-39 (4): `//SEGREDO` e `//s3cr3t` soltos (sem ponto no host) somem por inteiro, em vez de sair em minúsculas; `//Host.IO/x` com ponto volta COMO VEIO (a limpeza não altera o texto em silêncio); depois de opção que espera valor só passa a URL limpa e idêntica; a doc, a skill e o CHANGELOG dizem isso', () => {
+  const problemas = [];
+  const r1 = conferirArgumentos(['//SEGREDO', '//s3cr3t', '//SEGREDO?k=1', '//Host.IO/Limpa', '//h.io/limpa', '//localhost/x'], [DEF, DEF, DEF, '//Host.IO/Limpa', '//h.io/limpa', '//localhost/x']);
+  if (r1 !== true) problemas.push(`soltos: ${r1.detalhe}`);
+  const r2 = conferirArgumentos(['--foo', '//SEGREDO', '--bar', '//h.io/limpa', '-y', '//h.io/x?k=zq7'], ['--foo', DEF, '--bar', '//h.io/limpa', '-y', '//h.io/x']);
+  if (r2 !== true) problemas.push(`depois de opção: ${r2.detalhe}`);
+  const r3 = conferirArgumentos(['--foo', '//h.io/limpa'], ['--foo', '//h.io/limpa'], { ajuste: false });
+  if (r3 !== true) problemas.push(`URL limpa e idêntica depois de opção: ${r3.detalhe}`);
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.6]'), log.indexOf('## [1.2.5]'))]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['como veio', '//SEGREDO', 'sem ponto', 'espaço em branco', 'base64', '＠']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-39 (6): nenhuma entrada de 200 mil caracteres (só `:`, só `=`, `a:` e muitos `x`, espaços, `@`, `-` e `//` seguidos de `:`) leva mais de 1,5 s no total: a regra do `:` seguido de `@` é linear', () => {
+  const entradas = [':'.repeat(200000), '='.repeat(200000), `a:${'x'.repeat(200000)}`, ' '.repeat(200000), '@'.repeat(200000), `-${':'.repeat(200000)}`, `//${':'.repeat(200000)}`, `${'a'.repeat(200000)}=`, `x=${'='.repeat(200000)}`, 'a:'.repeat(100000)];
+  const t0 = Date.now();
+  for (const e of entradas) argumentosDoMcp([e], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  const ms = Date.now() - t0;
+  return ms < 1500 ? { ok: true, aviso: `${entradas.length} entradas de 200 mil caracteres em ${ms} ms` } : { ok: false, detalhe: `${ms} ms` };
+});
+
+// ------------------------------ PLG-40, quinto seguimento: pacote com versão, base64 seguido de espaço, valor invisível, `@` parecidos, limite de `S=1` e diferencial entre versões
+
+casoAmb('PLG-40 (1): o pacote com versão sem escopo fica visível (`mcp-remote@latest`, `firecrawl-mcp@1.2.3`, `mcp-server-git@2.0`, `img@sha256:…`, `pkg@v1.2`, `pkg@1.2.3-beta.1`, `pkg@next`, `@escopo/pacote@1.2.3`) e o arquivo gravado mantém o nome; usuário e host, host, segredo no lugar da versão, e-mail e `registro/img@sha256:…` somem, nos dois lados', () => {
+  const problemas = [];
+  const visiveis = ['mcp-remote@latest', 'firecrawl-mcp@1.2.3', 'mcp-server-git@2.0', DIGEST_PKG, 'pkg@v1.2', 'pkg@1.2.3-beta.1', 'pkg@next', 'pkg@1', 'pkg@rc', 'pkg@~1.2', '@escopo/pacote@1.2.3', '@escopo/pacote@latest', ESCOPO_PKG, 'git@github.com:org/repo.git'];
+  const r1 = conferirArgumentos(['-y', ...visiveis, 'https://h.io/mcp'], ['-y', ...visiveis, 'https://h.io/mcp'], { ajuste: false });
+  if (r1 !== true) problemas.push(`visíveis: ${r1.detalhe}`);
+  const { texto } = registrarComArgumentos(['-y', 'mcp-remote@latest', 'https://h.io/mcp']);
+  if (!texto.includes('mcp-remote@latest')) problemas.push('o arquivo gravado perdeu o nome do pacote com versão');
+  const somem = ['token@github.com/org/repo', 'ZQXWV9@h.io', 'usuario@host', 'user@host:22', 'deploy@srv:/app', 'ana@exemplo.com', 'u@10.0.0.1', '@escopo/pacote@ZQXWV9', `registro/${DIGEST_PKG}`, `img:tag@${DIGEST_PKG.slice(4)}`, 'ZQXWV9@', 'a@b@1.2', 'ZQXWV9@h.io:22', ...VERSAO_COM_SEGREDO];
+  const r2 = semFragmentos(somem, somem.map(() => DEF));
+  if (r2 !== true) problemas.push(`somem: ${r2.detalhe}`);
+  // o limite dito: um segredo no lugar do NOME do pacote, com versão no lugar certo, sai (tem a mesma forma de `pkg@1.2`)
+  const r3 = argumentosDoMcp(['ZQXWV9@1.2', 'ZQXWV9@latest'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  if (JSON.stringify(r3) !== JSON.stringify(['ZQXWV9@1.2', 'ZQXWV9@latest'])) problemas.push(`o limite mudou: ${JSON.stringify(r3)}`);
+  // depois de uma opção desconhecida o pacote sem escopo com versão continua escondido (como a palavra solta `pkg`); o com escopo é recurso claro
+  const r4 = conferirArgumentos(['--foo', 'mcp-remote@latest', '--bar', '@escopo/pacote@1.2.3'], ['--foo', DEF, '--bar', '@escopo/pacote@1.2.3']);
+  if (r4 !== true) problemas.push(`depois de opção: ${r4.detalhe}`);
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['pacote com versão', 'rótulo de versão', '`mcp-remote@latest`', '`usuario@host`', '`ZQXWV9@1.2`', 'limite conhecido', '`10.0.0.1`', 'falso positivo aceito']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (2): o base64 com `==` seguido de espaço, tabulação, quebra de linha ou espaço de largura total some POR INTEIRO, solto, depois de `--foo`, em `-k…`, em `-e …`, em `-e…` e em `--foo=…` (o valor é aparado antes de olhar); sem o espaço no fim, como antes', () => {
+  const problemas = [];
+  for (const [rotulo, fim] of [['espaço', ' '], ['dois espaços', '  '], ['tabulação', '\t'], ['quebra de linha', '\n'], ['CRLF', '\r\n'], ['largura total', '　'], ['largura zero', String.fromCharCode(0x200b)]]) {
+    const b = B64_PLG39 + fim;
+    const oculto = fim === String.fromCharCode(0x200b); // PLG-42: a largura zero carrega dados: a opção colada ao valor (`-k…`, `-e…`, `--foo=…`) some inteira, e o seguinte também (o estado fica ligado)
+    for (const [forma, args, esperado] of [
+      ['solto', [b, 'pkg'], [DEF, 'pkg']],
+      ['depois de --foo', ['--foo', b, 'pkg'], ['--foo', DEF, 'pkg']],
+      ['-k colado', [`-k${b}`, 'pkg'], oculto ? [DEF, DEF] : ['-k' + DEF, 'pkg']],
+      ['-e separado', ['-e', b, 'pkg'], ['-e', DEF, 'pkg']],
+      ['-e colado', [`-e${b}`, 'pkg'], oculto ? [DEF, DEF] : ['-e' + DEF, 'pkg']],
+      ['--foo=', [`--foo=${b}`, 'pkg'], oculto ? [DEF, DEF] : ['--foo=' + DEF, 'pkg']],
+      ['--api-key', ['--api-key', b, 'pkg'], ['--api-key', DEF, 'pkg']],
+    ]) {
+      const r = semFragmentos(args, esperado);
+      if (r !== true) problemas.push(`${rotulo}, ${forma}: ${r.detalhe}`);
+    }
+  }
+  const sem = semFragmentos([B64_PLG39, `-k${B64_PLG39}`, 'pkg'], [DEF, '-k' + DEF, DEF]); // como na PLG-39 (sem espaço)
+  if (sem !== true) problemas.push(`sem espaço: ${sem.detalhe}`);
+  // nome curto com valor e espaço no fim segue como antes (o `=` é seguido de algo que não é só `=`)
+  const r2 = conferirArgumentos(['NOME=valor ', 'pkg'], ['NOME=' + DEF, 'pkg']); // o `nome=valor` com espaço no fim segue como antes: só o nome fica
+  if (r2 !== true) problemas.push(`NOME=valor com espaço: ${r2.detalhe}`);
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.7]'), log.indexOf('## [1.2.6]'))]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['aparado', 'quebra de linha']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  const codigo = lerPacote('scripts/ambiente.mjs');
+  if (/some por INTEIRO, nome e valor, em qualquer forma \(solto/.test(codigo)) problemas.push('o comentário do código ainda diz "em qualquer forma"');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (3): com o estado ligado, a string só de largura zero (U+200B a U+200F, U+2060, U+FEFF), só de controle (U+0000 a U+001F, U+007F) ou mista é o valor (<definir>) e o estado continua ligado (o segredo seguinte não sai); sem estado ligado a vazia fica como está e a só de espaço some; a de largura zero some também (PLG-42: carrega dados)', () => {
+  const problemas = [];
+  const codigos = [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff, 0x0, 0x1, 0x1f, 0x7f, 0x9];
+  const invisiveis = codigos.map((c) => String.fromCharCode(c));
+  invisiveis.push(String.fromCharCode(0x200b, 0x0), ' ' + String.fromCharCode(0x2060) + '\t', String.fromCharCode(0xfeff, 0xfeff, 0xfeff));
+  for (const v of invisiveis) {
+    const nome = [...v].map((c) => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join('+');
+    // `--api-key`, opção desconhecida (`--foo`), `-p`, `-e`: o argumento invisível é o valor, o seguinte também, e só o terceiro volta ao normal
+    for (const op of ['--api-key', '--foo', '-p', '-e']) {
+      const r = semFragmentos([op, v, 'ZQXWV9', 'pkg'], [op, DEF, DEF, 'pkg']);
+      if (r !== true) problemas.push(`${op} + ${nome}: ${r.detalhe}`);
+    }
+    // vários seguidos, e o vazio no meio
+    const r2 = semFragmentos(['--api-key', v, '', v, 'ZQXWV9', 'pkg'], ['--api-key', DEF, DEF, DEF, DEF, 'pkg']);
+    if (r2 !== true) problemas.push(`vários + ${nome}: ${r2.detalhe}`);
+    // opção segura (`--port`): o invisível também é o valor dela, e o seguinte não sai solto
+    const r3 = semFragmentos(['--port', v, 'ZQXWV9', 'pkg'], ['--port', DEF, DEF, 'pkg']);
+    if (r3 !== true) problemas.push(`--port + ${nome}: ${r3.detalhe}`);
+  }
+  // sem estado ligado: a vazia fica; a só de espaço some (palavra solta com espaço); a de largura zero some também (PLG-42: carrega dados; a 1.2.7 a copiava)
+  const zw = String.fromCharCode(0x200b);
+  const antes = argumentosDoMcp(['-y', '', zw, ' ', 'pkg'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  if (JSON.stringify(antes) !== JSON.stringify(['-y', '', DEF, DEF, 'pkg'])) problemas.push(`sem estado ligado: ${JSON.stringify(antes)}`);
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', lerPacote('CHANGELOG.md').replace(/\s+/g, ' ')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['largura zero', 'U+200B', 'U+007F', 'sem estado ligado, a vazia']) if (nome !== 'CHANGELOG' || frase !== 'sem estado ligado, a vazia') if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (4): os `@` parecidos (`＠` U+FF20, `﹫` U+FE6B, e qualquer outro que a normalização NFKC leve a `@`, conferido por um laço pelo Unicode inteiro) fazem o argumento solto sumir por inteiro em qualquer posição (`S﹫host`, `＠a/b＠S`, `git＠h:S`, `//u:S﹫h`, sequência misturada com `@`); o texto que passa não é alterado', () => {
+  const problemas = [];
+  const parecidos = [];
+  for (let c = 0; c < 0x110000; c++) {
+    if (c >= 0xd800 && c <= 0xdfff) continue;
+    const ch = String.fromCodePoint(c);
+    if (ch !== '@' && ch.normalize('NFKC').includes('@')) parecidos.push(ch);
+  }
+  if (parecidos.map((c) => c.codePointAt(0).toString(16)).join() !== 'fe6b,ff20') problemas.push(`a lista de @ parecidos mudou: ${parecidos.map((c) => c.codePointAt(0).toString(16)).join()}`);
+  const roda = (a) => argumentosDoMcp(a, '/sede-falsa', '/casa-falsa', { ajuste: false });
+  for (const ch of parecidos) {
+    const formas = [`ZQXWV9${ch}host`, `${ch}a/b${ch}ZQXWV9`, `git${ch}h:ZQXWV9`, `//u:ZQXWV9${ch}h`, `${ch}ZQXWV9`, `ZQXWV9${ch}`, `ZQXWV9${ch}1.2`, `mcp-remote${ch}latest`, `u:ZQXWV9${ch}h`, `x${ch}@${ch}ZQXWV9`, `@a/b${ch}ZQXWV9`, `https://u:ZQXWV9${ch}h/db`, `--user:ZQXWV9${ch}h`];
+    const o = roda(formas);
+    const quemPassou = formas.filter((f, i) => o[i] !== DEF);
+    if (quemPassou.length) problemas.push(`U+${ch.codePointAt(0).toString(16)} deixou passar: ${quemPassou.join(' | ')}`);
+  }
+  // misturados com `@`, em várias posições: nunca sai o sentinela
+  const [a, b] = parecidos;
+  const mistura = [`ZQXWV9${a}${b}@host`, `@${a}ZQXWV9${b}@`, `${b}${a}${b}`, `ZQXWV9@${a}1.2`, `${a}@${b}`];
+  const o2 = roda(mistura);
+  if (o2.some((x) => /ZQXWV9/i.test(x))) problemas.push(`mistura vazou: ${JSON.stringify(o2)}`);
+  // pelo caminho de verdade (arquivo gravado)
+  const r = semFragmentos([`ZQXWV9${a}host`, 'pkg', `${b}a/b${b}ZQXWV9`, `git${b}h:ZQXWV9`], [DEF, 'pkg', DEF, DEF]);
+  if (r !== true) problemas.push(`registrar: ${r.detalhe}`);
+  // o que passa não é alterado (a normalização é só para decidir): `@escopo/nome@1.2.3` e `git@h:c` voltam como entraram
+  const ok = roda(['@escopo/nome@1.2.3', 'git@github.com:org/repo.git', 'pkg@latest']);
+  if (JSON.stringify(ok) !== JSON.stringify(['@escopo/nome@1.2.3', 'git@github.com:org/repo.git', 'pkg@latest'])) problemas.push(`alterou o que passa: ${JSON.stringify(ok)}`);
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.7]'), log.indexOf('## [1.2.6]'))]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['`﹫`', 'parecido']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (5): LIMITE conhecido, dito no texto: `S=1`, `-kS=1` e `--foo=S=1` mostram `S` como nome (`S=<definir>`) e o `1` nunca sai; o nome fica por estrutura (até 32 caracteres, só letra, dígito, `_`, `.` e `-`), sem lista de nomes; a propriedade afirma exatamente isso', () => {
+  const problemas = [];
+  const roda = (a) => argumentosDoMcp(a, '/sede-falsa', '/casa-falsa', { ajuste: false });
+  const o = roda([`${SENT1_PROP}=1`, `-k${SENT1_PROP}=1`, `--foo=${SENT1_PROP}=1`]);
+  const esperado = [`${SENT1_PROP}=${DEF}`, `-k${SENT1_PROP}=${DEF}`, `--foo=${SENT1_PROP}=${DEF}`];
+  if (JSON.stringify(o) !== JSON.stringify(esperado)) problemas.push(`o limite mudou: ${JSON.stringify(o)}`);
+  // depois de uma opção sensível ou de ambiente, o mesmo argumento vira <definir> inteiro (o limite é só para o que passa solto)
+  const o2 = roda(['--api-key', `${SENT1_PROP}=1`, '-e', `-k${SENT1_PROP}=1`]);
+  if (JSON.stringify(o2) !== JSON.stringify(['--api-key', DEF, '-e', DEF])) problemas.push(`depois de opção sensível: ${JSON.stringify(o2)}`);
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')], ['código', lerPacote('scripts/ambiente.mjs')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['`S=1`', '`-kS=1`', nome === 'código' ? 'LIMITE conhecido' : 'limite conhecido']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  // a camada independente da propriedade tem as três formas e a regra [L] que afirma exatamente o que o código faz
+  const p = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: [{ alfabeto: [`${SENT1_PROP}=1`, `-k${SENT1_PROP}=1`, `--foo=${SENT1_PROP}=1`, '--api-key', '-e', '--foo', 'pkg'], ate: 3, independente: true }] });
+  if (p.falhas.length) problemas.push(`propriedade: ${p.falhas.join(' | ')}`);
+  const copiaPura = (args) => args.map((x) => (typeof x === 'string' ? x : DEF));
+  const q = propriedadeDeArgumentos(copiaPura, { configuracoes: [{ alfabeto: [`${SENT1_PROP}=1`, '--api-key', 'pkg'], ate: 2, independente: true }], maxFalhas: 2 });
+  if (q.falhas.length === 0) problemas.push('a propriedade não reprovou a cópia do limite');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (6): o texto promete o que o código faz: a string só de espaço sem estado ligado NÃO fica como está (vira <definir>; só a vazia fica); a doc, a skill, o CHANGELOG e o comentário do código dizem isso, e nenhum diz "em qualquer forma" para o base64', () => {
+  const problemas = [];
+  const codigo = lerPacote('scripts/ambiente.mjs').replace(/\s+/g, ' ');
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    if (x.includes('sem estado ligado ela fica como está')) problemas.push(`${nome} ainda diz que a string só de espaço fica como está`);
+    if (/em qualquer forma, solto/.test(x)) problemas.push(`${nome} ainda diz "em qualquer forma" para o base64`);
+    if (!x.includes('a só de espaço em branco sai `<definir>`')) problemas.push(`${nome} não diz que a só de espaço sai <definir>`);
+  }
+  if (!codigo.includes('a só de espaço em branco vira `<definir>`')) problemas.push('o comentário do código não diz que a só de espaço vira <definir>');
+  if (codigo.includes('como a vazia; sem estado ligado fica como está;')) problemas.push('o comentário do código ainda diz "sem estado ligado fica como está"');
+  const e127 = log.slice(log.indexOf('## [1.2.7]'), log.indexOf('## [1.2.6]'));
+  if (!e127.includes('"sem estado ligado, fica como está". Não é verdade')) problemas.push('o CHANGELOG 1.2.7 não corrige a frase da 1.2.6');
+  const e126 = log.slice(log.indexOf('## [1.2.6]'), log.indexOf('## [1.2.5]'));
+  if (/nome e valor, em qualquer forma/.test(e126)) problemas.push('o CHANGELOG 1.2.6 ainda promete "em qualquer forma"');
+  if (!e126.includes('ver 1.2.7')) problemas.push('o CHANGELOG 1.2.6 não aponta para a 1.2.7');
+  // o código faz o que o texto diz
+  const zw = String.fromCharCode(0x200b);
+  const o = argumentosDoMcp([' ', '\t', '', zw], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  if (JSON.stringify(o) !== JSON.stringify([DEF, DEF, '', DEF])) problemas.push(`o código mudou: ${JSON.stringify(o)}`); // PLG-42: a de largura zero também some (carrega dados)
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (7): o diferencial entre a 1.2.6 (cópia congelada em tests/referencia) e o código novo, com as formas comuns de servidor MCP (npx, uvx, docker, node, python, --stdio, --port, --transport, URL, -e) e os destinos usuario@host: nada que a 1.2.6 mostrava e que não é segredo passa a sumir (salvo `@escopo/pacote@<texto sem rótulo de versão>`: experimental, dev, nightly, lts, 1.x), nada que ela escondia passa a aparecer (salvo o pacote sem escopo com versão), o segredo só melhora; e o diferencial pega a regressão da 1.2.6 ao contrário', () => {
+  const problemas = [];
+  const r = diferencialDeArgumentos(argumentosDaReferencia126, argumentosDoMcp, { ate: 3, ateMisto: 3 });
+  if (r.violacoes.length) problemas.push(`violações: ${r.violacoes.join(' | ')}`);
+  for (const t of ['mcp-remote@latest', 'firecrawl-mcp@1.2.3', 'servidor@2.0', DIGEST_PKG]) if (!r.reveladas.has(t)) problemas.push(`o diferencial não viu ${t.slice(0, 30)} passar a aparecer`);
+  for (const k of EXCECOES_DIF) if (!r.escondidas.has(k)) problemas.push(`a exceção documentada ${k} não apareceu no diferencial`);
+  if (r.limites.size !== 2) problemas.push(`os dois limites ditos (S@1.2 e sha256 de 64 hexadecimais) devem aparecer contados à parte: ${r.limites.size}`);
+  if ([...r.escondidas.keys()].some((k) => !EXCECOES_DIF.has(k))) problemas.push(`exceção não documentada: ${[...r.escondidas.keys()].join(' | ')}`);
+  if (r.melhoraSegredo.size < 3) problemas.push(`o segredo devia melhorar em mais fichas: ${r.melhoraSegredo.size}`);
+  for (const t of ['npx', 'uvx', 'docker', 'python', '--stdio', '--port', '--transport', 'https://h.io/mcp', '-e', 'usuario@host']) if (!FICHAS_COMUNS_DIF.includes(t)) problemas.push(`a ficha ${t} falta no conjunto`);
+  // as linhas de comando inteiras: a 1.2.6 escondia o pacote com versão; o novo mostra; o resto fica igual
+  for (const c of COMANDOS_DIF) {
+    const a = argumentosDaReferencia126(c, '/sede-falsa', '/casa-falsa', { ajuste: false });
+    const b = argumentosDoMcp(c, '/sede-falsa', '/casa-falsa', { ajuste: false });
+    const muda = c.filter((t, i) => a[i] !== b[i]);
+    if (muda.some((t) => !/@(?:latest|[0-9]|sha256:)/.test(t))) problemas.push(`linha ${JSON.stringify(c)} mudou além do pacote com versão: ${JSON.stringify(a)} -> ${JSON.stringify(b)}`);
+  }
+  // o inverso: o diferencial PEGA a regressão (a 1.2.6 como "novo" contra o código de agora como "antigo")
+  const contrario = diferencialDeArgumentos(argumentosDoMcp, argumentosDaReferencia126, { ate: 2, ateMisto: 2 });
+  if (contrario.violacoes.length === 0) problemas.push('o diferencial não pegou a regressão do pacote com versão (a 1.2.6 contra o código de agora)');
+  return problemas.length === 0 ? { ok: true, aviso: r.resumo.join(' | ') } : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (8): tempo: `pkg@rc`, `@a/b@rc`, `pkg@1.2.3-rc` (e `pkg@beta`, `pkg@v1`) com `@` normal e com `＠`, seguidos de 40 dígitos e `!`, de 200 mil dígitos, de `.1` ou `-1` repetidos e de 200 mil letras, e um fuzz de entradas longas e repetitivas por todos os começos que o código reconhece, ficam cada um abaixo de 1,5 s (antes: ×4 a cada 2 dígitos, n=40 levava horas); o teste roda num processo à parte, que o tempo limite mata', () => {
+  const script = join(PACOTE, 'tests', 'tempo-argumentos.mjs');
+  const r = spawnSync(process.execPath, [script, SCRIPT_AMBIENTE, '6000'], { encoding: 'utf8', timeout: Math.max(TEMPO_LIMITE, 120000) });
+  if (r.error || r.status !== 0) return { ok: false, detalhe: `${r.error ? r.error.code ?? r.error.message : `saída ${r.status}`}: ${(r.stdout || '').slice(-600)} ${(r.stderr || '').slice(-300)}` };
+  const nomeados = /casos nomeados: (\d+) medidos.*acima de 1500 ms: (\d+)/.exec(r.stdout);
+  const fuzz = /fuzz \(\d+ caracteres\): (\d+) medidos.*acima de 1500 ms: (\d+)/.exec(r.stdout);
+  if (!nomeados || !fuzz) return { ok: false, detalhe: `saída inesperada: ${r.stdout.slice(0, 300)}` };
+  if (Number(nomeados[1]) < 60 || Number(fuzz[1]) < 20000) return { ok: false, detalhe: `poucos casos medidos: ${nomeados[1]} nomeados, ${fuzz[1]} de fuzz` };
+  return { ok: true, aviso: r.stdout.trim().split('\n').join(' | ').slice(0, 300) };
+});
+
+casoAmb('PLG-40 (9): o segredo NA POSIÇÃO DA VERSÃO (`pkg@1.2.3-S`, `pkg@1.2.3+S`, `pkg@v1-ghp_…`, `pkg@1.2.3-rc.S`, `pkg@S`, `@a/b@1.2.3-S`, `pkg@sha256:<32 hexadecimais>`, `pkg＠1.2.3-S`) nunca sai (solto, depois de opção e dentro de qualquer sequência: propriedade, as duas camadas); o rótulo de versão não tem texto livre: forma aceita fica, o resto some; digest só com o comprimento exato; os limites ditos saem como o texto diz', () => {
+  const problemas = [];
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: CONFIG_VERSAO });
+  const soma = (n) => n + n ** 2 + n ** 3 + n ** 4;
+  const esperado = soma(ALFABETO_VERSAO.length) + soma(ALFABETO_VERSAO_CADEIA.length);
+  if (r.falhas.length || r.sequencias !== esperado) problemas.push(`propriedade: ${r.sequencias} de ${esperado}: ${r.falhas.join(' | ')}`);
+  const r1 = semFragmentos(VERSAO_COM_SEGREDO, VERSAO_COM_SEGREDO.map(() => DEF));
+  if (r1 !== true) problemas.push(`segredo na posição da versão: ${r1.detalhe}`);
+  const r2 = semFragmentos(['--foo', ...VERSAO_COM_SEGREDO.slice(0, 3), '-y', ...VERSAO_COM_SEGREDO.slice(3)], ['--foo', DEF, DEF, DEF, '-y', ...VERSAO_COM_SEGREDO.slice(3).map(() => DEF)]);
+  if (r2 !== true) problemas.push(`depois de opção e de bandeira: ${r2.detalhe}`);
+  const h = (c, n) => c.repeat(Math.ceil(n / c.length)).slice(0, n);
+  const aceitos = ['pkg@1.2.3-beta.1', 'pkg@^1.2.3', 'pkg@~1.2', 'pkg@rc2', 'pkg@rc.2', 'pkg@beta-3', 'pkg@1.2.3+20240101', 'pkg@1.2.3-rc.1', 'pkg@1.2.3-alpha', 'pkg@1.2.3-nightly.20240101', 'pkg@v2', 'pkg@1.2.3-dev', 'pkg@1.2.3-snapshot', 'pkg@1.2.3-pre.2',
+    `pkg@sha1:${h('a1b2c3d4e5', 40)}`, `pkg@sha256:${h('a1b2c3d4', 64)}`, `pkg@sha384:${h('a1b2c3d4', 96)}`, `pkg@sha512:${h('a1b2c3d4', 128)}`, '@a/b@1.2.3-beta.1', ...PACOTES_COMUNS];
+  const r3 = conferirArgumentos(['-y', ...aceitos], ['-y', ...aceitos], { ajuste: false });
+  if (r3 !== true) problemas.push(`formas aceitas: ${r3.detalhe}`);
+  const recusados = ['pkg@1.2.3.4', 'pkg@1.2.3.4-x', 'pkg@10.0.0.1', 'pkg@10.0.0.1+x', 'pkg@1.2.3-rc-1', 'pkg@1.2.3-rc.1.2.3.4.5', 'pkg@1.2.3-beta.1+build5', `pkg@sha256:${h('a1b2c3d4', 63)}`, `pkg@sha256:${h('a1b2c3d4', 65)}`, `pkg@sha256:${h('a1b2c3d4', 32)}`, `pkg@sha1:${h('a1b2c3d4', 64)}`,
+    'pkg@1.x', 'pkg@*', 'pkg@>=1.2', 'pkg@rc12345', 'pkg@dev', 'pkg@lts', '@escopo/pacote@dev', '@escopo/pacote@nightly', '@escopo/pacote@lts', '@escopo/pacote@1.x', 'pkg@1.2.3-', 'pkg@1.2.3-.', 'pkg@@1.2'];
+  const r4 = conferirArgumentos(recusados, recusados.map(() => DEF));
+  if (r4 !== true) problemas.push(`formas que somem: ${r4.detalhe}`);
+  const limites = [...LIMITE_DE_VERSAO.keys()];
+  const lim = argumentosDoMcp(limites, '/sede-falsa', '/casa-falsa', { ajuste: false });
+  if (JSON.stringify(lim) !== JSON.stringify(limites)) problemas.push(`o limite dito mudou: ${JSON.stringify(lim)}`);
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['sem texto livre', '`1.2.3-ZQXWV9`', '`v1-ghp_…`', 'comprimento **exato**', '`sha1:` com 40', '`sha512:` com 128', '`^1.2.3`', '`~1.2`', '`1.2.3.4`', '`10.0.0.1`', '`@escopo/pacote@dev`', '`@escopo/pacote@nightly`', '`@escopo/pacote@lts`', '`@escopo/pacote@1.x`', 'limites conhecidos', '`pacote@sha256:` com 64 hexadecimais']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  const e127 = log.slice(log.indexOf('## [1.2.7]'), log.indexOf('## [1.2.6]'));
+  for (const frase of ['sem texto livre', '`pkg@1.2.3-ZQXWV9`', 'digest de comprimento exato', '`@escopo/pacote@lts`', '`@escopo/pacote@1.x`', '`10.0.0.1`, `1.2.3.4`', 'Teste de tempo', 'Limites ditos']) if (!e127.includes(frase)) problemas.push(`o CHANGELOG 1.2.7 não diz "${frase}"`);
+  return problemas.length === 0 ? { ok: true, aviso: r.aviso } : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (10): com o estado ligado, a string SEM NENHUM caractere de letra, número, pontuação ou símbolo (critério por estrutura: separadores, controle, formato, marcas Mn/Mc/Me, seletores de variação, uso privado, sem designação, não-caracteres como U+FFFF, até os de fora do plano básico) ou só de U+2800, U+3164, U+115F, U+1160 e U+FFA0 é o valor (<definir>) e mantém o estado: um caso por categoria, um laço pelo Unicode inteiro (nenhum ponto de código sem L/N/P/S deixa o segredo seguinte em claro; nenhum com conteúdo muda) e propriedade; no fim de um base64 com `==` o argumento some por inteiro; um invisível junto de uma letra é só um valor', () => {
+  const problemas = [];
+  const lista = [0xad, 0x180e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff, 0x85, 0x7f, 0x0, 0x1f, 0xa0, 0x2028, 0x2029, 0x3000, 0x2003, 0x202f, 0x61c, 0x2066, 0x202e, 0xe0001, 0xe0020, 0x1d173, 0x34f, 0x2800, 0x3164, 0x115f, 0x1160, 0xffa0,
+    0x300, 0x903, 0x20dd, 0xfe0f, 0x180b, 0x17b4, 0xe000, 0xf0000, 0xe0100, 0xffff, 0x378, 0xfdd0, 0x10ffff]; // Mn, Mc, Me, seletor de variação, Mn, Mn, Co, Co (plano 15), seletor de variação (tag), não-caractere, Cn, não-caractere, último ponto
+  const b64 = 'QWxhZGRpbjpv' + 'cGVuIHNlc2FtZQ==';
+  for (const cp of lista) {
+    const c = String.fromCodePoint(cp);
+    const nome = `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+    for (const [forma, v] of [['sozinho', c], ['repetido', c + c], ['entre espaços', ` ${c} `]]) {
+      const o = argumentosDoMcp(['--api-key', v, 'ZQXWV9', 'pkg'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+      if (JSON.stringify(o) !== JSON.stringify(['--api-key', DEF, DEF, 'pkg'])) problemas.push(`${nome} ${forma}: ${JSON.stringify(o)}`);
+    }
+    const f = argumentosDoMcp([b64 + c, '--foo', b64 + c + c], '/sede-falsa', '/casa-falsa', { ajuste: false });
+    if (JSON.stringify(f) !== JSON.stringify([DEF, '--foo', DEF])) problemas.push(`${nome} no fim do base64: ${JSON.stringify(f)}`);
+  }
+  const junto = argumentosDoMcp(['--api-key', 'a' + String.fromCharCode(0x200b), 'pkg'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+  if (JSON.stringify(junto) !== JSON.stringify(['--api-key', DEF, 'pkg'])) problemas.push(`invisível junto de letra: ${JSON.stringify(junto)}`);
+  // laço pelo Unicode inteiro (e pelos substitutos soltos): sem L/N/P/S (fora os cinco que desenham nada) o segredo seguinte não sai; com conteúdo, o valor some e o estado NÃO continua (como antes)
+  const conteudo = /[\p{L}\p{N}\p{P}\p{S}]/u;
+  const cincoQueNaoDesenham = new Set([0x2800, 0x3164, 0x115f, 0x1160, 0xffa0]);
+  const pontos = [];
+  for (let c = 0; c <= 0x10ffff; c++) pontos.push(String.fromCodePoint(c));
+  for (let c = 0xd800; c <= 0xdfff; c++) pontos.push(String.fromCharCode(c));
+  let semConteudo = 0;
+  const falhasUnicode = [];
+  for (const ch of pontos) {
+    const cp = ch.codePointAt(0);
+    const o = argumentosDoMcp(['--api-key', ch, 'ZQXWV9'], '/sede-falsa', '/casa-falsa', { ajuste: false });
+    if (!conteudo.test(ch) || cincoQueNaoDesenham.has(cp)) { semConteudo += 1; if (o[1] !== DEF || o[2] !== DEF) { if (falhasUnicode.length < 5) falhasUnicode.push(`U+${cp.toString(16).toUpperCase()} deixou o segredo: ${JSON.stringify(o)}`); } }
+    else if (o[1] !== DEF || o[2] !== 'ZQXWV9') { if (falhasUnicode.length < 5) falhasUnicode.push(`U+${cp.toString(16).toUpperCase()} (com conteúdo) mudou: ${JSON.stringify(o)}`); }
+  }
+  if (falhasUnicode.length) problemas.push(`laço pelo Unicode: ${falhasUnicode.join(' | ')}`);
+  if (semConteudo < 900000) problemas.push(`o laço viu poucos pontos sem conteúdo: ${semConteudo}`);
+  for (const ch of ['a', 'Z', '7', '-', '!', '$', 'é', '字', '😀']) { const o = argumentosDoMcp(['--api-key', ch, 'ZQXWV9'], '/sede-falsa', '/casa-falsa', { ajuste: false }); if (o[1] !== DEF || o[2] !== 'ZQXWV9') problemas.push(`valor legítimo ${JSON.stringify(ch)} mudou: ${JSON.stringify(o)}`); }
+  const r = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: CONFIG_INVISIVEL });
+  const soma = (n) => n + n ** 2 + n ** 3 + n ** 4;
+  const esperado = soma(ALFABETO_INVISIVEL.length) + soma(ALFABETO_INVISIVEL_CADEIA.length);
+  if (r.falhas.length || r.sequencias !== esperado) problemas.push(`propriedade: ${r.sequencias} de ${esperado}: ${r.falhas.join(' | ')}`);
+  if (INVISIVEIS_NOVOS.length < 6 || INVISIVEIS_ESPACO.length < 3) problemas.push('o alfabeto da propriedade perdeu invisíveis');
+  for (const [nome, tx] of [['doc', lerPacote('docs/ambiente.md')], ['skill', lerPacote('skills/ambiente/SKILL.md')]]) {
+    const x = tx.replace(/\s+/g, ' ');
+    for (const frase of ['sem nenhum caractere de letra, número, pontuação ou símbolo', 'seletores de variação', 'uso privado', 'U+FFFF', 'U+2800', 'U+3164', 'U+115F', 'U+1160', 'U+FFA0', 'carrega dados sem aparecer']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? { ok: true, aviso: r.aviso } : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-40 (11): a cópia da 1.2.6 em tests/referencia é só referência de teste: exporta só `argumentosDoMcp`, não tem linha de comando, não lê o ambiente, não grava arquivo, não executa programa e não importa módulo do pacote; `node ambiente-1.2.6.mjs registrar` não faz nada; o cabeçalho diz que não é para uso e que tem vazamentos conhecidos; nenhum script do pacote a importa', () => {
+  const problemas = [];
+  const caminho = join(PACOTE, 'tests', 'referencia', 'ambiente-1.2.6.mjs');
+  const t = readFileSync(caminho, 'utf8');
+  const exportados = [...t.matchAll(/^export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
+  if (JSON.stringify(exportados) !== JSON.stringify(['argumentosDoMcp'])) problemas.push(`exporta ${JSON.stringify(exportados)}`);
+  if (/^export\s*\{|^export\s+default/m.test(t)) problemas.push('tem exportação fora da forma esperada');
+  const proibidos = t.match(/\b(?:writeFileSync|appendFileSync|mkdirSync|mkdtempSync|renameSync|rmSync|unlinkSync|copyFileSync|spawnSync|spawn|execSync|execFileSync|exec|readFileSync|readdirSync|createWriteStream|process\.argv|process\.exit|process\.env|import\.meta|fileURLToPath|hostname|require)\b/g) ?? [];
+  if (proibidos.length) problemas.push(`usa ${[...new Set(proibidos)].join(', ')}`);
+  const imports = [...t.matchAll(/^import\s.*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+  if (imports.some((i) => i !== 'node:path')) problemas.push(`importa ${imports.join(', ')}`);
+  if (/^#!/.test(t)) problemas.push('tem shebang');
+  const cabeca = t.split('\n').slice(0, 8).join(' ');
+  for (const frase of ['NÃO É PARA USO', 'vazamentos conhecidos', 'Só exporta `argumentosDoMcp`']) if (!cabeca.includes(frase)) problemas.push(`o cabeçalho não diz "${frase}"`);
+  // rodar a cópia como programa não faz nada: sem saída, sem arquivo criado
+  const pasta = mkdtempSync(join(tmpdir(), 'ref126-'));
+  try {
+    const r = spawnSync(process.execPath, [caminho, 'registrar', '--confirmado', `--sede=${pasta}`, `--saida=${join(pasta, 'ambiente.yaml')}`], { cwd: pasta, encoding: 'utf8', timeout: TEMPO_LIMITE, env: { ...process.env, CLAUDE_CONFIG_DIR: join(pasta, '.claude'), INTOCA_HOME: pasta } });
+    if (r.status !== 0 || r.stdout !== '' || r.stderr !== '') problemas.push(`rodou e fez algo: saída ${r.status}, stdout ${JSON.stringify(r.stdout.slice(0, 80))}, stderr ${JSON.stringify(r.stderr.slice(0, 80))}`);
+    if (readdirSync(pasta).length !== 0) problemas.push(`criou ${readdirSync(pasta).join(', ')}`);
+  } finally { rmSync(pasta, { recursive: true, force: true }); }
+  // só os testes importam a cópia
+  for (const rel of ['scripts', 'hooks']) for (const nome of readdirSync(join(PACOTE, rel))) if (/\.mjs$/.test(nome) && /referencia\/ambiente-1\.2\.6/.test(readFileSync(join(PACOTE, rel, nome), 'utf8'))) problemas.push(`${rel}/${nome} importa a referência`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-38 (6): boas-vindas diz que o "pode" vale também para ato sem volta (fiel à regra 4), nas três frases que resumem a regra', () => {
+  const b = lerPacote('docs/boas-vindas.md').replace(/\s+/g, ' ');
+  const faltam = ['dá o "pode" de tudo o que sai para o mundo e de ato sem volta', 'dá o "pode" de qualquer coisa que saia para o mundo e de ato sem volta', '(publicar, enviar a terceiros, apagar de forma irreversível) e de ato sem volta'].filter((t) => !b.includes(t));
+  return faltam.length === 0 ? true : { ok: false, detalhe: `faltam: ${faltam.join(' | ')}` };
+});
+
+// ------------------------------ PLG-42, sexto seguimento: o texto falso dos invisíveis, os dígitos livres na versão, o IPv4 com sufixo, as formas que somem e o teste de tempo que diz o caso
+const TEXTOS_PLG42 = () => {
+  const log = lerPacote('CHANGELOG.md').replace(/\s+/g, ' ');
+  return [['doc', lerPacote('docs/ambiente.md').replace(/\s+/g, ' ')], ['skill', lerPacote('skills/ambiente/SKILL.md').replace(/\s+/g, ' ')], ['CHANGELOG', log.slice(log.indexOf('## [1.2.8]'), log.indexOf('## [1.2.7]'))], ['código', lerPacote('scripts/ambiente.mjs').replace(/\s+/g, ' ')]];
+};
+const rodaPlg42 = (a) => argumentosDoMcp(a, '/sede-falsa', '/casa-falsa', { ajuste: false });
+const ESPACO_JS = /\s/u;
+
+casoAmb('PLG-42 (1): o caractere que CARREGA DADOS (formato Cf, uso privado Co, sem designação Cn, substituto solto Cs, seletor de variação, controle Cc, caractere de tag) faz o argumento sumir POR INTEIRO: sozinho, colado a uma palavra (`abc` + tag), no começo, no meio e no fim, solto e como valor de opção, com ou sem estado ligado; uma varredura pelo Unicode inteiro; letras, números, pontuação, símbolo, acentos e `Mn` comum seguem', () => {
+  const problemas = [];
+  const reps = {
+    Cf: [0xad, 0x600, 0x61c, 0x180e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202e, 0x2060, 0x2066, 0xfeff, 0xfff9, 0x1d173, 0xe0001, 0xe0020, 0xe0041, 0xe007f],
+    Co: [0xe000, 0xf8ff, 0xf0000, 0x10fffd],
+    Cn: [0x378, 0xfdd0, 0xffff, 0x10ffff, 0xe0080],
+    VS: [0x180b, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef],
+    Cc: [0x0, 0x1, 0x8, 0xe, 0x1f, 0x7f, 0x85, 0x9f],
+    Cs: [0xd800, 0xdbff, 0xdc00, 0xdfff],
+  };
+  const SENT = 'ZQXWV9';
+  for (const [cat, lista] of Object.entries(reps)) {
+    for (const cp of lista) {
+      const c = cp >= 0xd800 && cp <= 0xdfff ? String.fromCharCode(cp) : String.fromCodePoint(cp);
+      const nome = `${cat} U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+      const formas = [[c], ['abc' + c], [c + 'abc'], ['a' + c + 'bc'], [SENT + c], [c + SENT], [c + c], ['--nome=abc' + c]];
+      for (const f of formas) {
+        const o = rodaPlg42(f);
+        if (o[0] !== DEF) problemas.push(`${nome} solto ${JSON.stringify(f[0])}: ${JSON.stringify(o)}`);
+      }
+      // valor de opção: a opção sensível, a desconhecida e a segura; o colado a uma palavra é o valor e o estado acaba; o feito só de invisíveis é o valor e o estado continua (o segredo seguinte não sai)
+      for (const op of ['--api-key', '--foo', '--nome']) {
+        const colado = rodaPlg42([op, 'abc' + c, 'pkg']);
+        if (JSON.stringify(colado) !== JSON.stringify([op, DEF, 'pkg'])) problemas.push(`${nome} colado depois de ${op}: ${JSON.stringify(colado)}`);
+        const sozinho = rodaPlg42([op, c, SENT, 'pkg']);
+        if (JSON.stringify(sozinho) !== JSON.stringify([op, DEF, DEF, 'pkg'])) problemas.push(`${nome} sozinho depois de ${op}: ${JSON.stringify(sozinho)}`);
+      }
+    }
+  }
+  // pelo caminho de verdade (o arquivo gravado): a tag colada, o formato, o uso privado, o sem designação e o seletor de variação
+  const tag = String.fromCodePoint(0xe0041, 0xe0042);
+  const r = semFragmentos(['abc' + tag, tag, 'ZQXWV9' + tag, String.fromCodePoint(0xe000) + 'pkg', 'pkg' + String.fromCharCode(0x200b), 'pkg' + String.fromCodePoint(0xfe0f), String.fromCodePoint(0x378), 'pkg'], [DEF, DEF, DEF, DEF, DEF, DEF, DEF, 'pkg']);
+  if (r !== true) problemas.push(`registrar: ${r.detalhe}`);
+  // a varredura pelo Unicode inteiro (e pelos substitutos soltos): cada ponto de código das categorias é escondido com `S` antes e depois; cada letra e número, com `abc` antes, passa
+  const categoria = (ch) => (/\p{Cf}/u.test(ch) ? 'Cf' : /\p{Co}/u.test(ch) ? 'Co' : /\p{Cn}/u.test(ch) ? 'Cn' : /\p{Cs}/u.test(ch) ? 'Cs' : /\p{Variation_Selector}/u.test(ch) ? 'VS' : /\p{Cc}/u.test(ch) && !ESPACO_JS.test(ch) ? 'Cc' : null);
+  const contagem = { Cf: 0, Co: 0, Cn: 0, Cs: 0, VS: 0, Cc: 0 };
+  let letrasENumeros = 0;
+  let marcasComuns = 0;
+  const falhas = [];
+  const um = (ch) => {
+    const cat = categoria(ch);
+    const cp = ch.codePointAt(0);
+    if (cat) {
+      contagem[cat] += 1;
+      const o = rodaPlg42([SENT + ch, ch + SENT, ch]);
+      if (o[0] !== DEF || o[1] !== DEF || o[2] !== DEF) { if (falhas.length < 5) falhas.push(`${cat} U+${cp.toString(16).toUpperCase()} deixou sair: ${JSON.stringify(o)}`); }
+    } else if (/[\p{L}\p{N}]/u.test(ch) || (cp >= 0x300 && cp <= 0x36f)) {
+      if (cp >= 0x300 && cp <= 0x36f) marcasComuns += 1; else letrasENumeros += 1;
+      const o = rodaPlg42(['abc' + ch]);
+      if (o[0] !== 'abc' + ch) { if (falhas.length < 5) falhas.push(`U+${cp.toString(16).toUpperCase()} (letra, número ou marca comum) sumiu: ${JSON.stringify(o)}`); }
+    }
+  };
+  for (let c = 0; c <= 0x10ffff; c++) { if (c >= 0xd800 && c <= 0xdfff) continue; um(String.fromCodePoint(c)); }
+  for (let c = 0xd800; c <= 0xdfff; c++) um(String.fromCharCode(c));
+  if (falhas.length) problemas.push(`varredura: ${falhas.join(' | ')}`);
+  const minimos = { Cf: 150, Co: 130000, Cn: 700000, Cs: 2048, VS: 260, Cc: 60 };
+  for (const [cat, n] of Object.entries(minimos)) if (contagem[cat] < n) problemas.push(`a varredura viu poucos pontos de ${cat}: ${contagem[cat]} (mínimo ${n})`);
+  if (letrasENumeros < 100000 || marcasComuns !== 112) problemas.push(`a varredura viu poucas letras e números (${letrasENumeros}) ou marcas comuns (${marcasComuns}, esperava 112)`);
+  // o que fica: acentos (compostos e decompostos), pontuação, símbolos, emoji sem junção, letras de outras escritas
+  const ficam = ['pasta' + String.fromCharCode(0x301), 'ação', 'caf' + String.fromCharCode(0x65, 0x301), 'a.b-c_d', 'x!y', '$x', '字', '😀', 'Привет', 'pkg@1.2.3', '@escopo/pacote'];
+  const f = rodaPlg42(ficam);
+  if (JSON.stringify(f) !== JSON.stringify(ficam)) problemas.push(`o que devia ficar mudou: ${JSON.stringify(f)}`);
+  // o falso positivo aceito e dito no texto: o emoji com junção, o texto com marca de direção
+  const fp = rodaPlg42(['👨' + String.fromCharCode(0x200d) + '👩', 'שלום' + String.fromCharCode(0x200f), '❤' + String.fromCharCode(0xfe0f), 'pkg' + String.fromCharCode(0x200c) + 'x']);
+  if (JSON.stringify(fp) !== JSON.stringify([DEF, DEF, DEF, DEF])) problemas.push(`o falso positivo aceito mudou: ${JSON.stringify(fp)}`);
+  // o texto: nenhuma afirmação de que o invisível "não carrega segredo"; a doc, a skill, o CHANGELOG e o código dizem o que o código faz e declaram o falso positivo
+  for (const [nome, x] of TEXTOS_PLG42()) {
+    if (!/carrega(?:m)? dados/i.test(x)) problemas.push(`${nome} não diz que o invisível carrega dados`);
+    if (!/por inteiro/i.test(x)) problemas.push(`${nome} não diz "por inteiro"`);
+    for (const frase of ['U+200D', 'U+200E']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+    if (!/falso positivo aceito/i.test(x)) problemas.push(`${nome} não declara o falso positivo aceito`);
+    if (/n[ãa]o carrega segredo/i.test(x)) problemas.push(`${nome} ainda diz que o invisível "não carrega segredo"`);
+  }
+  for (const [nome, x] of TEXTOS_PLG42().slice(0, 3)) for (const frase of ['caracteres de tag', 'emoji com junção', 'seletor']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  for (const arq of ['README.md', 'CHANGELOG.md']) if (/n[ãa]o carrega segredo/i.test(lerPacote(arq))) problemas.push(`${arq} ainda diz "não carrega segredo"`);
+  // a propriedade (as duas camadas, com os caracteres e as formas coladas) passa; contra o código da 1.2.7 reprova (a cópia pura também)
+  const copiaPura = (args) => args.map((x) => (typeof x === 'string' ? x : DEF));
+  const q = propriedadeDeArgumentos(copiaPura, { configuracoes: [{ alfabeto: ['--api-key', 'pkg', ZW_PROP, COLADO_A_TAG_PROP, SEGREDO_COLADO_A_TAG_PROP], ate: 2, independente: true }], maxFalhas: 2 });
+  if (q.falhas.length === 0) problemas.push('a propriedade não reprovou a cópia pura dos caracteres que carregam dados');
+  return problemas.length === 0 ? { ok: true, aviso: `varredura: ${Object.entries(contagem).map(([k, v]) => `${k} ${v}`).join(', ')}; letras e números ${letrasENumeros}; marcas comuns ${marcasComuns}` } : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (2): dígitos livres na posição da versão: o núcleo aceita até 6 dígitos por parte, o segmento do sufixo só de dígitos até 8 e o número colado a `rc`/`beta` até 4; o teto exato passa e o teto +1 some; os números de 10 dígitos somem; as formas comuns ficam; o limite (segredo só de dígitos dentro dos tetos) está dito', () => {
+  const problemas = [];
+  const d = (n) => '1'.repeat(n);
+  const passam = [`pkg@${d(6)}.${d(6)}.${d(6)}`, `pkg@${d(6)}`, `pkg@1.${d(6)}`, `pkg@1.2.3-${d(8)}`, `pkg@1.2.3+${d(8)}`, `pkg@1.2.3-rc${d(4)}`, `pkg@rc${d(4)}`, `pkg@beta-${d(4)}`, `pkg@1.2.3-rc.${d(4)}`, `pkg@1.2.3-nightly.${d(8)}`, `@a/b@${d(6)}.${d(6)}.${d(6)}`,
+    'pkg@1.2.3-rc.1', 'pkg@1.2.3-beta.2', 'pkg@1.2.3+20240101', 'pkg@1.2.3-1.2', 'mcp-remote@latest', 'firecrawl-mcp@1.2.3', 'pkg@^1.2.3', 'pkg@~1.2', 'pkg@v1.2'];
+  const r1 = conferirArgumentos(['-y', ...passam], ['-y', ...passam], { ajuste: false });
+  if (r1 !== true) problemas.push(`o teto exato devia passar: ${r1.detalhe}`);
+  const somem = [`pkg@${d(7)}`, `pkg@${d(7)}.1.1`, `pkg@1.${d(7)}`, `pkg@1.1.${d(7)}`, `pkg@1.2.3-${d(9)}`, `pkg@1.2.3+${d(9)}`, `pkg@1.2.3-rc${d(5)}`, `pkg@rc${d(5)}`, `pkg@beta-${d(5)}`, `pkg@1.2.3-nightly.${d(9)}`, `@a/b@${d(7)}.1.1`,
+    'pkg@1234567890.1234567890.1234567890', 'pkg@1234567890', 'pkg@1.2.3-rc1234567890', 'pkg@1.2.3-1234567890.1234567890.1234567890.1234567890', 'pkg@1.2.3-1234567890', 'pkg@20240101', '@a/b@20240101.1.1'];
+  const r2 = conferirArgumentos(somem, somem.map(() => DEF));
+  if (r2 !== true) problemas.push(`o teto +1 e os números de 10 dígitos deviam sumir: ${r2.detalhe}`);
+  // depois de uma opção desconhecida e dentro de uma sequência: o que some continua sumindo e o que fica, com o estado ligado, vira o valor
+  const r3 = conferirArgumentos(['--foo', 'pkg@1.2.3-rc.1', '-y', 'pkg@1.2.3-rc1234567890', 'pkg@1.2.3-rc.1'], ['--foo', DEF, '-y', DEF, 'pkg@1.2.3-rc.1']);
+  if (r3 !== true) problemas.push(`em sequência: ${r3.detalhe}`);
+  // o limite dito: um segredo só de dígitos que caiba nos tetos e esteja na posição da versão sai
+  const lim = rodaPlg42(['pkg@123456.123456.123456', 'pkg@1.2.3-12345678']);
+  if (JSON.stringify(lim) !== JSON.stringify(['pkg@123456.123456.123456', 'pkg@1.2.3-12345678'])) problemas.push(`o limite dito mudou: ${JSON.stringify(lim)}`);
+  for (const [nome, x] of TEXTOS_PLG42()) {
+    for (const frase of ['6 dígitos', '8', '4 dígitos', '`pacote@1234567890.1234567890.1234567890`'].slice(0, nome === 'código' ? 0 : nome === 'CHANGELOG' ? 2 : 3)) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+    if (nome !== 'código' && !/(?:um segredo \*\*só de dígitos\*\*|um segredo só de dígitos)/.test(x)) problemas.push(`${nome} não declara o limite do segredo só de dígitos`);
+    if (nome === 'código' && !x.includes('SÓ DE DÍGITOS')) problemas.push('o código não declara o limite do segredo só de dígitos');
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (3): o IPv4 com sufixo some (`pkg@1.2.3-10.0.0.1`, `pkg@1.2.3+10.0.0.1`, `pkg@1.2.3-1.2.3.4`, e três segmentos só de dígitos), e `pkg@1.2.3-rc.1`, `pkg@1.2.3+20240101`, `pkg@1.2.3-beta.2` e o núcleo de quatro números continuam como antes; o texto fala do sufixo', () => {
+  const problemas = [];
+  const somem = ['pkg@1.2.3-10.0.0.1', 'pkg@1.2.3+10.0.0.1', 'pkg@1.2.3-1.2.3.4', 'pkg@1-10.0.0.1', 'pkg@1.2.3-1.2.3', 'pkg@1.2.3+192.168.0.1', '@a/b@1.2.3-10.0.0.1', 'pkg@10.0.0.1', 'pkg@1.2.3.4', 'pkg@1.2.3.4-x', 'pkg@1.2.3-1.2.3.4.5'];
+  const r1 = conferirArgumentos(somem, somem.map(() => DEF));
+  if (r1 !== true) problemas.push(`o endereço devia sumir: ${r1.detalhe}`);
+  const ficam = ['pkg@1.2.3-rc.1', 'pkg@1.2.3+20240101', 'pkg@1.2.3-beta.2', 'pkg@1.2.3-1.2', 'pkg@1.2.3-rc.1.2', 'pkg@1.2.3-alpha.1.beta', 'mcp-remote@latest', 'firecrawl-mcp@1.2.3', 'pkg@1.2.3-nightly.20240101', '@a/b@1.2.3-rc.1'];
+  const r2 = conferirArgumentos(ficam, ficam, { ajuste: false });
+  if (r2 !== true) problemas.push(`as formas comuns deviam ficar: ${r2.detalhe}`);
+  for (const [nome, x] of TEXTOS_PLG42().slice(0, 3)) for (const frase of ['`1.2.3-10.0.0.1`', 'três segmentos']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (4): as formas que somem e o texto não dizia estão ditas como falso positivo aceito, sem mudar o código (`@escopo/pacote@1.2.3-canary.5a8d6c5`, `@escopo/pacote@experimental`, `pkg@1.2.3+build.5`), e `NOME=` seguido só de invisíveis some inteiro, sem o nome', () => {
+  const problemas = [];
+  const somem = ['@escopo/pacote@1.2.3-canary.5a8d6c5', '@escopo/pacote@experimental', 'pkg@1.2.3+build.5', 'pkg@1.2.3-canary.5a8d6c5'];
+  const r1 = conferirArgumentos(somem, somem.map(() => DEF));
+  if (r1 !== true) problemas.push(`as formas ditas deviam sumir: ${r1.detalhe}`);
+  const invisiveis = [String.fromCharCode(0x200b), String.fromCharCode(0x200b, 0x200b), String.fromCharCode(0x301), String.fromCharCode(0x2800), ' ', '\t', '\n', String.fromCharCode(0x0), String.fromCodePoint(0xe0041)];
+  for (const v of invisiveis) {
+    const o = rodaPlg42([`NOME=${v}`, '-e', `NOME=${v}`, 'pkg']);
+    if (JSON.stringify(o) !== JSON.stringify([DEF, '-e', DEF, 'pkg'])) problemas.push(`NOME= + ${JSON.stringify(v)} (devia sumir inteiro, sem o nome): ${JSON.stringify(o)}`);
+  }
+  for (const [nome, x] of TEXTOS_PLG42().slice(0, 3)) {
+    const frases = nome === 'CHANGELOG' ? ['`@escopo/pacote@1.2.3-canary.5a8d6c5`', '`@escopo/pacote@experimental`', '`pkg@1.2.3+build.5`', 'só de caracteres invisíveis'] : ['`@escopo/pacote@1.2.3-canary.5a8d6c5`', '`@escopo/pacote@experimental`', '`pacote@1.2.3+build.5`', 'só de caracteres invisíveis'];
+    for (const frase of frases) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (5): o teste de tempo diz o caso: cada caso mede o próprio tempo dentro do processo, com limite por caso, e há casos com o rótulo de versão logo abaixo do teto (100 a 135 caracteres); numa cópia fora do pacote com a regex antiga `(?:[.-]?[0-9]+)*` do `ROTULO_DE_TAG`, o teste reprova em poucos segundos DIZENDO o caso (base, forma, cauda, tamanho, tempo), sem esperar o tempo limite', () => {
+  const problemas = [];
+  const script = join(PACOTE, 'tests', 'tempo-argumentos.mjs');
+  const fonte = readFileSync(script, 'utf8');
+  if (!fonte.includes('performance.now')) problemas.push('o teste de tempo não mede com performance.now');
+  const mod = TEMPO_MOD;
+  if (mod.LIMITE_MS !== 1500) problemas.push(`limite por caso ${mod.LIMITE_MS}`);
+  // os casos de rótulo chegam logo abaixo do teto: a entrada `pkg@rc` + dígitos de 100 a 135 caracteres de rótulo existe, e o rótulo mede o que a escada diz
+  const familias = mod.familiasDeRotulo();
+  const tamanhos = new Set(familias.flatMap((f) => f.tamanhos));
+  for (const n of [100, 120, 130, 135]) if (!tamanhos.has(n)) problemas.push(`falta o comprimento ${n} nos casos de rótulo`);
+  const rc = familias.find((f) => f.cauda === 'rc + dígitos + !');
+  const formas = new Set(familias.map((f) => f.cauda));
+  for (const f of ['rc + dígitos + !', 'núcleo de dígitos + !', '1.2.3- + segmentos repetidos']) if (!formas.has(f)) problemas.push(`falta a forma "${f}"`);
+  if (!rc || rc.args(135)[0].slice('pkg@'.length).length !== 135 || rc.args(100)[0].slice('pkg@'.length).length !== 100) problemas.push('o rótulo de rc + dígitos não mede 100 e 135');
+  if (mod.VERSAO_MAX !== 135) problemas.push(`o teto do teste (${mod.VERSAO_MAX}) não é o do código`);
+  if (!/const VERSAO_MAX = 135;/.test(lerPacote('scripts/ambiente.mjs'))) problemas.push('o teto do código mudou: o teste de tempo precisa seguir');
+  // o código de agora passa
+  const bom = spawnSync(process.execPath, [script, SCRIPT_AMBIENTE, '6000'], { encoding: 'utf8', timeout: Math.max(TEMPO_LIMITE, 120000) });
+  const linhaRotulos = /rótulos de versão de 10 a 136 caracteres.*: (\d+) medidos.*acima de 1500 ms: (\d+)/.exec(bom.stdout ?? '');
+  if (bom.status !== 0 || !linhaRotulos || Number(linhaRotulos[1]) < 5000 || linhaRotulos[2] !== '0') problemas.push(`o código de agora devia passar medindo mais de 5000 rótulos: saída ${bom.status}; ${((bom.stdout ?? '').split('\n').find((l) => l.includes('LENTO')) ?? (bom.stdout ?? '').trim().split('\n').pop() ?? '').trim().slice(0, 220)}`);
+  // PLG-42 (correção): sem falso alarme em máquina ocupada. Um atraso ISOLADO (o agendador do sistema pega uma medida) não reprova, nem entre passos próximos; o que é lento em todas as medidas reprova, dizendo o caso
+  if (mod.REPETICOES !== 3 || !(mod.PASSO_PROXIMO > 1 && mod.PASSO_PROXIMO <= 1.5)) problemas.push(`repetições ${mod.REPETICOES}, passo próximo ${mod.PASSO_PROXIMO}`);
+  const espera = (ms) => { const t0 = performance.now(); while (performance.now() - t0 < ms) { /* ocupa a CPU */ } };
+  const fam = (nome) => [{ nome, base: 'x', forma: '@', cauda: 'c', args: (n) => ['a'.repeat(n)], tamanhos: [20, 22, 24, 26] }];
+  let gasto = false;
+  const unico = mod.medirEscada((a) => { if (a[0].length === 24 && !gasto) { gasto = true; espera(700); } }, fam('atraso único'));
+  if (unico.lentos.length) problemas.push(`um atraso isolado de 700 ms reprovou (falso alarme): ${unico.lentos[0].nome} n=${unico.lentos[0].tamanho} ${unico.lentos[0].ms} ms`);
+  const sempre = mod.medirEscada((a) => { if (a[0].length === 24) espera(700); }, fam('lento sempre'));
+  if (sempre.lentos.length !== 1 || sempre.lentos[0].tamanho !== 26 && sempre.lentos[0].tamanho !== 24 && sempre.lentos[0].tamanho !== 22) problemas.push(`o que é lento em todas as medidas devia reprovar uma vez, e foi ${sempre.lentos.length}`);
+  const exponencial = mod.medirEscada((a) => espera(Math.min(0.01 * 2 ** (a[0].length - 8), 5000)), fam('exponencial'));
+  if (exponencial.lentos.length !== 1 || !exponencial.lentos[0].tendencia) problemas.push(`o exponencial devia reprovar pela tendência, em passos próximos: ${JSON.stringify(exponencial.lentos.map((l) => [l.tamanho, l.ms, l.tendencia]))}`);
+  const salto = mod.medirEscada((a) => espera(a[0].length === 40000 ? 400 : 0), [{ nome: 'salto', base: 'x', forma: '@', cauda: 'c', args: (n) => ['a'.repeat(n)], tamanhos: [100, 1000, 40000, 200000] }]);
+  if (salto.lentos.length) problemas.push('passos distantes (de 1000 a 40000) não comparam tendência: só o limite por caso vale');
+  // os casos com caractere oculto de 200 mil caracteres estão na escada (e não só no fuzz)
+  const oc = mod.familiasNomeadas().filter((x) => x.nome.startsWith('oculto '));
+  if (oc.length < 10 || !oc.every((x) => x.tamanhos.includes(200000))) problemas.push('faltam os casos com caractere oculto de 200 mil caracteres na escada');
+  // a mutação, FORA do pacote (pasta temporária; o caminho dos módulos vira URL de arquivo): a regex antiga do ROTULO_DE_TAG
+  const dir = mkdtempSync(join(tmpdir(), 'intoca-mut-'));
+  try {
+    const codigo = readFileSync(SCRIPT_AMBIENTE, 'utf8');
+    const nova = 'const ROTULO_DE_TAG = /^(?:latest|next|beta|alpha|canary|stable|rc)(?:[.-]?[0-9]+)*$/;';
+    const m = /const ROTULO_DE_TAG = .*;/.exec(codigo);
+    if (!m) problemas.push('não achei o ROTULO_DE_TAG no código');
+    else {
+      const base = dirname(SCRIPT_AMBIENTE);
+      const mutado = codigo.replace(m[0], nova).replace(/from '(\.{1,2}\/[^']+)'/g, (_, esp) => `from '${pathToFileURL(resolve(base, esp)).href}'`);
+      const arquivo = join(dir, 'ambiente-mutado.mjs');
+      writeFileSync(arquivo, mutado);
+      const t0 = Date.now();
+      const ruim = spawnSync(process.execPath, [script, arquivo, '6000'], { encoding: 'utf8', timeout: 100000 });
+      const segundos = (Date.now() - t0) / 1000;
+      if (ruim.error) problemas.push(`a mutação nem terminou (o tempo limite do processo, e não o caso, a pegou): ${ruim.error.code ?? ruim.error.message}`);
+      else {
+        if (ruim.status !== 1) problemas.push(`a mutação devia reprovar (saída 1): saída ${ruim.status}`);
+        const lentas = (ruim.stdout ?? '').split('\n').filter((l) => l.includes('LENTO'));
+        if (!lentas.length || !lentas.every((l) => /LENTO base=".*" forma=\S+ cauda=".*" tamanho=\d+ tempo=\d+ ms/.test(l) && l.length < 240)) problemas.push('o relatório não traz, em UMA linha, base, forma, cauda, tamanho e tempo');
+        if (segundos > 60) problemas.push(`a mutação levou ${segundos} s: devia ser poucos segundos`);
+      }
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (6): as fichas do diferencial ganharam as formas novas (caracteres de tag colados, dígitos grandes na versão, `pkg@1.2.3-10.0.0.1`), o modo contra a 1.2.7 existe e declara as exceções uma a uma; o código novo esconde as extras, mostra as comuns e esconde só as quatro exceções ditas', () => {
+  const problemas = [];
+  const dif = { diferencial: diferencialDeArgumentos };
+  const novas = FICHAS_NOVAS_1_2_8;
+  const extras = EXTRAS_1_2_8;
+  const excecoes = EXCECOES_1_2_8;
+  for (const f of ['pkg@1.2.3-10.0.0.1', 'pkg@1234567890.1234567890.1234567890', 'pkg@1.2.3-rc1234567890']) if (!novas.includes(f)) problemas.push(`falta a ficha ${f}`);
+  if (!novas.some((f) => f.startsWith('abc') && f.codePointAt(3) >= 0xe0000)) problemas.push('falta a ficha com caracteres de tag colados a uma palavra');
+  if (excecoes.size !== 4) problemas.push(`as exceções ditas são quatro (emoji com junção, emoji com seletor de variação, marca de direção, número de núcleo grande): ${excecoes.size}`);
+  const o = rodaPlg42(novas);
+  novas.forEach((f, i) => {
+    if (extras.has(f) || excecoes.has(f)) { if (o[i] !== DEF) problemas.push(`${JSON.stringify(f)} devia sumir: ${JSON.stringify(o[i])}`); }
+    else if (o[i] !== f) problemas.push(`${JSON.stringify(f)} devia ficar: ${JSON.stringify(o[i])}`);
+  });
+  const r = dif.diferencial(argumentosDoMcp, argumentosDoMcp, { fichas: ['a', 'pkg@1.2.3-rc.1'], ate: 2, ateMisto: 1, revela: new Set(), excecoes, extras, contra: '1.2.7' });
+  if (r.violacoes.length) problemas.push(`o código contra ele mesmo: ${r.violacoes.join(' | ')}`);
+  if (!r.resumo.join('\n').includes('1.2.7')) problemas.push('o resumo não diz contra qual versão');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('PLG-42 (7): a opção com caractere oculto (colado ao nome, no meio ou no fim: um traço, dois traços, `-e`, `-H`, `--header`) sai `<definir>` e o argumento SEGUINTE sai `<definir>` por inteiro, seja URL com caminho curto, `@escopo/nome`, `~/x`, `nome=valor` ou `S=1` (nunca o estado do argumento solto, que copia o que parece claro); sem o oculto a opção segue como antes; a propriedade e o diferencial novos reprovam a ponta anterior (o estado solto no lugar do estrito) e passam na de agora; caminho, URL e JSON com oculto somem por inteiro; o texto diz o que o código faz (U+0009 a U+000D, Cn depende do Unicode do Node, o que ainda sai copiado, fora dos args, a lista completa dos rótulos)', () => {
+  const problemas = [];
+  const Z = String.fromCharCode(0x200b);
+  const S = SENT1_PROP;
+  const casos = [
+    [`-p${Z}`, `https://h.io/${S}`], [`-p${Z}`, `~/${S}`], [`-password${Z}`, `https://h.io/${S}`], [`-p${Z}`, `${S}=1`], [`-e${Z}`, `${S}=1`], [`-H${Z}`, `https://h.io/${S}`],
+    [`--api-key${Z}`, `https://h.io/${S}`], [`--token${Z}`, `https://h.io/${S}`], [`--header${Z}`, `https://h.io/${S}`], [`-p${Z}x`, `https://h.io/${S}`], [`-p${Z}`, '@escopo/nome'],
+    [`-p${Z}`, `${String.fromCharCode(0xff20)}a/${S}`], [`-p${Z}`, 'nome=valor'], [`-p${Z}`, 'https://h.io/mcp'], [`--api${Z}-key`, 'https://h.io/mcp'], [`-k${String.fromCodePoint(0xe0041)}`, `https://h.io/${S}`],
+  ];
+  for (const c of casos) {
+    const o = rodaPlg42(c);
+    if (JSON.stringify(o) !== JSON.stringify([DEF, DEF])) problemas.push(`${JSON.stringify(c)} devia sair [${DEF}, ${DEF}]: ${JSON.stringify(o)}`);
+    if (JSON.stringify(o).includes(S)) problemas.push(`o sentinela saiu: ${JSON.stringify(o)}`);
+  }
+  // sem o oculto, a opção segue como antes; o estado continua pelas opções sensíveis e acaba na palavra
+  const sem = rodaPlg42(['-p', `https://h.io/${S}`]);
+  if (JSON.stringify(sem) !== JSON.stringify(['-p', DEF])) problemas.push(`sem o oculto devia sair ["-p", "${DEF}"]: ${JSON.stringify(sem)}`);
+  const cadeia = rodaPlg42([`-p${Z}`, '--api-key', S, 'pkg', 'https://h.io/mcp']);
+  if (JSON.stringify(cadeia) !== JSON.stringify([DEF, '--api-key', DEF, 'pkg', 'https://h.io/mcp'])) problemas.push(`a cadeia: ${JSON.stringify(cadeia)}`);
+  const acaba = rodaPlg42([`-p${Z}`, 'abc', 'https://h.io/mcp']);
+  if (JSON.stringify(acaba) !== JSON.stringify([DEF, DEF, 'https://h.io/mcp'])) problemas.push(`o estado devia acabar na palavra: ${JSON.stringify(acaba)}`);
+  // caminho, URL e JSON com caractere oculto somem por inteiro
+  for (const a of [`/mcp/pasta${Z}`, `https://h.io/mcp${Z}`, `https://h.io/${Z}mcp`, `{"a":"1${Z}"}`, `{"a${Z}":1}`, `${Z}/mcp/pasta`]) {
+    const o = rodaPlg42([a]);
+    if (o[0] !== DEF) problemas.push(`${JSON.stringify(a)} devia sumir por inteiro: ${JSON.stringify(o)}`);
+  }
+  // o que o texto diz que ainda sai copiado, colado a uma palavra, de fato sai; e U+0009 a U+000D não saem copiados (já contam como espaço em branco)
+  for (const cp of [0x34f, 0x17b4, 0x17b5, 0x2800, 0x3164, 0x115f, 0x1160, 0xffa0]) { const s = `abc${String.fromCodePoint(cp)}`; if (rodaPlg42([s])[0] !== s) problemas.push(`U+${cp.toString(16).toUpperCase()} colado a uma palavra devia sair copiado: ${JSON.stringify(rodaPlg42([s]))}`); }
+  for (let cp = 9; cp <= 13; cp++) { const s = `abc${String.fromCodePoint(cp)}`; if (rodaPlg42([s])[0] === s) problemas.push(`U+${cp.toString(16).toUpperCase()} colado a uma palavra não devia sair copiado`); }
+  // a propriedade e o diferencial novos passam no código de agora (os dois, de 1 a 2 de cada vez; a rodada inteira, até 3, roda na propriedade completa)
+  const config = [{ alfabeto: ALFABETO_OPCAO_OCULTA_PROP, ate: 2, independente: true }];
+  const bom = propriedadeDeArgumentos(argumentosDoMcp, { configuracoes: config, maxFalhas: 3 });
+  if (bom.falhas.length) problemas.push(`a propriedade da opção oculta reprovou o código de agora: ${bom.falhas[0]}`);
+  const dbom = diferencialDeOpcaoOculta(argumentosDoMcp, argumentosDoMcp, { ate: 2 });
+  if (dbom.violacoes.length) problemas.push(`o diferencial da opção oculta reprovou o código contra ele mesmo: ${dbom.violacoes[0]}`);
+  // e reprovam a ponta anterior (o estado solto OCULTO no lugar do ESTRITO), numa cópia fora do pacote
+  const dir = mkdtempSync(join(tmpdir(), 'intoca-mut7-'));
+  try {
+    const codigo = readFileSync(SCRIPT_AMBIENTE, 'utf8');
+    const alvo = '? ESTRITO : null';
+    if (!codigo.includes(alvo)) problemas.push('não achei o estado ESTRITO no código');
+    else {
+      const base = dirname(SCRIPT_AMBIENTE);
+      const mutado = codigo.replace(alvo, '? OCULTO : null').replace(/from '(\.{1,2}\/[^']+)'/g, (_, esp) => `from '${pathToFileURL(resolve(base, esp)).href}'`);
+      writeFileSync(join(dir, 'ambiente-mutado.mjs'), mutado);
+      const u = (p) => JSON.stringify(pathToFileURL(p).href);
+      const corredor = [
+        `const prop = await import(${u(join(PACOTE, 'tests', 'propriedade-argumentos.mjs'))});`,
+        `const dif = await import(${u(join(PACOTE, 'tests', 'diferencial-argumentos.mjs'))});`,
+        `const mut = (await import(${u(join(dir, 'ambiente-mutado.mjs'))})).argumentosDoMcp;`,
+        `const real = (await import(${u(SCRIPT_AMBIENTE)})).argumentosDoMcp;`,
+        `const p = prop.propriedade(mut, { configuracoes: [{ alfabeto: prop.ALFABETO_OPCAO_OCULTA, ate: 2, independente: true }], maxFalhas: 3 });`,
+        `const d = dif.diferencialDeOpcaoOculta(real, mut, { ate: 2 });`,
+        `console.log(JSON.stringify({ propriedade: p.falhas.length, diferencial: d.violacoes.length, primeira: p.falhas[0] ?? '' }));`,
+      ].join('\n');
+      writeFileSync(join(dir, 'corredor.mjs'), corredor);
+      const r = spawnSync(process.execPath, [join(dir, 'corredor.mjs')], { encoding: 'utf8', timeout: 120000 });
+      let saida = null;
+      try { saida = JSON.parse((r.stdout ?? '').trim().split('\n').pop()); } catch { /* cai na mensagem abaixo */ }
+      if (!saida) problemas.push(`o corredor da ponta anterior não devolveu o resultado: ${r.status} ${(r.stderr ?? '').slice(0, 200)}`);
+      else {
+        if (saida.propriedade === 0) problemas.push('a propriedade da opção oculta devia reprovar a ponta anterior (o estado solto no lugar do estrito)');
+        if (saida.diferencial === 0) problemas.push('o diferencial da opção oculta devia reprovar a ponta anterior');
+      }
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  // o texto
+  for (const [nome, x] of TEXTOS_PLG42().slice(0, 3)) {
+    for (const frase of ['U+0009 a U+000D', 'depende da versão do Unicode do Node', 'fora dos `args`', 'U+034F', 'U+17B4']) if (!x.includes(frase)) problemas.push(`${nome} não diz "${frase}"`);
+    if (!/caminho, URL e JSON/i.test(x)) problemas.push(`${nome} não diz de caminho, URL e JSON`);
+    if (nome !== 'CHANGELOG' && !x.includes('`url`')) problemas.push(`${nome} não diz da url do tipo http`);
+    if (/salvo a tabulação e a quebra de linha/.test(x)) problemas.push(`${nome} ainda diz "salvo a tabulação e a quebra de linha"`);
+    if (/n[ãa]o tem nenhum deles/.test(x)) problemas.push(`${nome} ainda diz que o que sai copiado "não tem nenhum deles"`);
+  }
+  const cl = TEXTOS_PLG42()[2][1];
+  for (const frase of ['Opção com caractere oculto', 'Lista completa', '`pkg@1.2.3-rc12345`', '`pkg@1.2.3-2024.1.1`', '`pkg@1.2.3+20130313144700`', '`pkg@1.2.3-123456789`', '`pkg@1234567`']) if (!cl.includes(frase)) problemas.push(`o CHANGELOG não diz "${frase}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+casoAmb('pacote: versão 1.2.9 no plugin.json, no título do README e no CHANGELOG, com o /intoca:ambiente descrito, os seguimentos numerados sem troca e as entradas 1.2.6 (base64, espaço, `＠`, `//`), 1.2.5 (traço único, `//`, vazio, limite) e 1.2.4 (--, não-texto, nomes, limite)', () => {
+  const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
+  const readme = lerPacote('README.md');
+  const log = lerPacote('CHANGELOG.md');
+  const problemas = [];
+  if (p.version !== '1.2.9') problemas.push(`plugin.json ${p.version}`);
+  if (!readme.startsWith('# InToca Sede (plugin `intoca`, versão 1.2.9)')) problemas.push('título do README');
+  const e128 = log.slice(log.indexOf('## [1.2.8]'), log.indexOf('## [1.2.7]'));
+  if (!log.includes('## [1.2.8] - 2026-11-19')) problemas.push('CHANGELOG sem a entrada 1.2.8');
+  for (const x of ['carregam dados', 'caracteres de tag', 'falso positivo', '6 dígitos por parte', '`pkg@1.2.3-10.0.0.1`', '1.2.3-10.0.0.1', '`@escopo/pacote@experimental`', 'tempo', 'diferencial', 'poucos segundos']) if (!e128.includes(x)) problemas.push(`a entrada 1.2.8 não diz "${x}"`);
+  if (/(?:PLG|INT|DIR|SAL)-[0-9]+/.test(e128)) problemas.push('a entrada 1.2.8 cita ID de OS (regra PLG-06a)');
+  if (PROIBIDO.test(readme)) problemas.push('o README usa o verbo proibido');
+  const e127 = log.slice(log.indexOf('## [1.2.7]'), log.indexOf('## [1.2.6]'));
+  if (!log.includes('## [1.2.7] - 2026-11-17')) problemas.push('CHANGELOG sem a entrada 1.2.7');
+  for (const x of ['pacote com versão', '`mcp-remote@latest`', 'rótulo de versão', '`usuario@host`', 'aparado', '`@` parecidos', 'largura zero', 'limite conhecido', '`S=1`', 'diferencial', 'efeito colateral']) if (!e127.includes(x)) problemas.push(`a entrada 1.2.7 não diz "${x}"`);
+  if (/(?:PLG|INT|DIR|SAL)-[0-9]+/.test(e127)) problemas.push('a entrada 1.2.7 cita ID de OS (regra PLG-06a)');
+  const e126 = log.slice(log.indexOf('## [1.2.6]'), log.indexOf('## [1.2.5]'));
+  if (!log.includes('## [1.2.6] - 2026-11-16')) problemas.push('CHANGELOG sem a entrada 1.2.6');
+  for (const x of ['base64', '`==`', 'espaço em branco', '`＠`', '`//SEGREDO`', 'como veio', 'quadrática', 'palavra sensível', '32 caracteres']) if (!e126.includes(x)) problemas.push(`a entrada 1.2.6 não diz "${x}"`);
+  if (/(?:PLG|INT|DIR|SAL)-[0-9]+/.test(e126)) problemas.push('a entrada 1.2.6 cita ID de OS (regra PLG-06a)');
+  // PLG-39 (7): os seguimentos do /intoca:ambiente, numerados pela ordem das OS (1.2.1 e a continuação 1.2.2: primeiro; 1.2.4: segundo; 1.2.5: terceiro; 1.2.6: quarto; 1.2.7: quinto), sem número repetido ou trocado
+  const abertura = (v, depois) => log.slice(log.indexOf(`## [${v}]`), log.indexOf(`## [${depois}]`)).split('\n').find((l) => /seguimento/i.test(l)) ?? '';
+  for (const [v, depois, ordinal] of [['1.2.8', '1.2.7', 'Sexto seguimento'], ['1.2.7', '1.2.6', 'Quinto seguimento'], ['1.2.6', '1.2.5', 'Quarto seguimento'], ['1.2.5', '1.2.4', 'Terceiro seguimento'], ['1.2.4', '1.2.3', 'Segundo seguimento'], ['1.2.2', '1.2.1', 'Continuação do primeiro seguimento']]) if (!abertura(v, depois).startsWith(ordinal)) problemas.push(`a entrada ${v} devia abrir com "${ordinal}": ${abertura(v, depois).slice(0, 60)}`);
+  const e125 = log.slice(log.indexOf('## [1.2.5]'), log.indexOf('## [1.2.4]'));
+  if (!log.includes('## [1.2.5] - 2026-11-16')) problemas.push('CHANGELOG sem a entrada 1.2.5');
+  for (const x of ['-accesskey', '//usuario', 'string vazia', 'qualquer opção que espera valor', 'oráculo independente', 'ato sem volta']) if (!e125.includes(x)) problemas.push(`a entrada 1.2.5 não diz "${x}"`);
+  if (/(?:PLG|INT|DIR|SAL)-[0-9]+/.test(e125)) problemas.push('a entrada 1.2.5 cita ID de OS (regra PLG-06a)');
+  const e124 = log.slice(log.indexOf('## [1.2.4]'), log.indexOf('## [1.2.3]'));
+  if (!log.includes('## [1.2.4] - 2026-11-16')) problemas.push('CHANGELOG sem a entrada 1.2.4');
+  for (const t of ['`--`', 'não-texto', 'palavra inteira', '--api-key --token-', 'limite']) if (!e124.includes(t)) problemas.push(`a entrada 1.2.4 não diz "${t}"`);
+  if (!log.includes('## [1.2.2] - 2026-11-15') || !log.includes('## [1.2.1] - 2026-11-15') || !log.includes('## [1.2.0] - 2026-11-14')) problemas.push('CHANGELOG sem as entradas');
+  const seguimento = log.slice(log.indexOf('## [1.2.1]'), log.indexOf('## [1.2.0]'));
+  for (const t of ['Seguimento da 1.2.0', 'plugin disable', 'ambiente.yaml', 'nome=valor', 'na dúvida']) if (!seguimento.includes(t)) problemas.push(`a entrada 1.2.1 não diz "${t}"`);
+  const entrada = log.slice(log.indexOf('## [1.2.0]'), log.indexOf('## [1.1.0]'));
+  if (!entrada.includes('/intoca:ambiente') || !entrada.includes('ambiente.yaml')) problemas.push('a entrada não descreve o ambiente');
+  if (entrada.includes('e em todo `NOME=valor` de argumento só o nome fica')) problemas.push('a entrada 1.2.0 ainda promete "só o nome fica" sem a ressalva das formas coladas');
+  if (!readme.includes('/intoca:ambiente') || !readme.includes('docs/ambiente.md')) problemas.push('README sem o /intoca:ambiente');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join(' | ') };
+});
+
+// ---------------------------------------------------------------- palavras (regra 4: a palavra do proprietário também pela Diretoria)
+// O pacote ensina o que o regimento diz: a palavra dele vale no chat do gerente ou, gravada pela Diretoria em
+// `diretoria/palavras/`, no chat da Diretoria. A sede nova já vem com a pasta e o modelo da palavra.
+
+const casoPal = (nome, fn) => caso('palavras', nome, fn);
+const SKILLS_DO_PACOTE = () => readdirSync(join(PACOTE, 'skills')).map((n) => ({ nome: n, texto: lerPacote(`skills/${n}/SKILL.md`) }));
+const arquivosMdDe = (dir, rel = '') => readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => {
+  const r = rel ? `${rel}/${e.name}` : e.name;
+  return e.isDirectory() ? arquivosMdDe(dir, r) : (r.endsWith('.md') ? [r] : []);
+});
+
+casoPal('sede nova: vem com diretoria/palavras/README.md e diretoria/modelos/palavra.md, com o formato do modelo', () => {
+  const c = cenarioComecar();
+  const ok = deu(rodarCriar(respostas(c), c));
+  if (ok !== true) return ok;
+  const faltam = ['diretoria/palavras/README.md', 'diretoria/modelos/palavra.md'].filter((d) => !existsSync(join(c.sede, ...d.split('/'))));
+  if (faltam.length) return { ok: false, detalhe: `faltam: ${faltam.join(', ')}` };
+  const modelo = lerArq(c.sede, 'diretoria', 'modelos', 'palavra.md');
+  const leia = lerArq(c.sede, 'diretoria', 'palavras', 'README.md');
+  const problemas = [];
+  if (!modelo.startsWith('# Palavra do proprietário')) problemas.push('modelo sem o título');
+  for (const t of ['Palavras exatas do proprietário', 'Data e hora', 'Confirmação', 'Limites', 'O que o gerente faz com isto']) if (!modelo.includes(t)) problemas.push(`o modelo não tem "${t}"`);
+  if (!leia.startsWith('# Palavras do proprietário dadas na Diretoria') || !leia.includes('Vale o arquivo, não a mensagem')) problemas.push('README das palavras');
+  if (modelo !== lerSedePartida('diretoria/modelos/palavra.md') || leia !== lerSedePartida('diretoria/palavras/README.md')) problemas.push('diferem do modelo do pacote');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('sede nova: o AGENTS.md da sede traz a regra 4 nova (chat da Diretoria, gravada, diretoria/palavras) e a cadeia de comando', () => {
+  const c = cenarioComecar();
+  const ok = deu(rodarCriar(respostas(c), c));
+  if (ok !== true) return ok;
+  const t = lerArq(c.sede, 'AGENTS.md').replace(/\s+/g, ' ');
+  const problemas = ['no chat da Diretoria', 'só vale depois de gravada', 'diretoria/palavras/<AAAA-MM-DD>-<ID>.md', 'diretoria/modelos/palavra.md', 'repete antes o que entendeu',
+    'devolve a dúvida à Diretoria', 'só transmite', 'ou com a Diretoria, à escolha dele'].filter((f) => !t.includes(f)).map((f) => `AGENTS sem "${f}"`);
+  if (/chat deles|fala com um chat por projeto|chat só: a Diretoria/.test(t)) problemas.push('AGENTS ainda traz a regra antiga');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('PLG-37 (B5) comportamento: na sede criada, as frases-chave estão DENTRO da regra 4 (e não soltas em outro lugar), a regra 5 vem depois dela, e o memorando criado traz a confirmação antes de gravar', () => {
+  const c = cenarioComecar();
+  const ok = deu(rodarCriar(respostas(c), c));
+  if (ok !== true) return ok;
+  const t = lerArq(c.sede, 'AGENTS.md').replace(/\s+/g, ' ');
+  const ini = t.indexOf('4. **Produção só com autorização registrada em arquivo.**');
+  const fim = t.indexOf('5. **Governança versionada.**');
+  const problemas = [];
+  if (ini < 0 || fim < ini) return { ok: false, detalhe: 'não achei a regra 4 e a 5 na ordem' };
+  const regra4 = t.slice(ini, fim);
+  for (const f of ['diretoria/autorizacoes/<ID>.md', 'no chat do gerente do projeto', 'diretoria/palavras/<AAAA-MM-DD>-<ID>.md', 'repete antes o que entendeu', 'só grava com a confirmação', 'não vale como autorização', 'só transmite']) {
+    if (!regra4.includes(f)) problemas.push(`a regra 4 da sede criada não diz "${f}"`);
+  }
+  const memorando = lerArq(c.sede, 'diretoria', 'memorando.md').replace(/\s+/g, ' ');
+  if (!/ato sem volta, a Diretoria repete antes o que entendeu e só grava com a confirmação/.test(memorando)) problemas.push('o memorando criado não traz a confirmação antes de gravar (produção e ato sem volta)');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('PLG-37 (B1, B3) comportamento: as skills executor e gerente não deixam a palavra dispensar o arquivo de autorização em produção; o executor exige o arquivo de autorização além da palavra e o gerente fala em "produção e ato sem volta"', () => {
+  const ex = lerPacote('skills/executor/SKILL.md').replace(/\s+/g, ' ');
+  const ge = lerPacote('skills/gerente/SKILL.md').replace(/\s+/g, ' ');
+  const problemas = [];
+  // o item de produção do executor tem de conter, na mesma bolha, a palavra da Diretoria E a exigência do arquivo de autorização
+  const item = ex.slice(ex.indexOf('- Não assume autorização de produção.'), ex.indexOf('- Não usa `--no-verify`.'));
+  if (!item.includes('diretoria/palavras/') || !/Em produção a palavra não basta/.test(item) || !item.includes('ops/autorizacoes/<ID>.md') || !item.includes('diretoria/autorizacoes/<ID>.md')) problemas.push('o item de produção do executor não exige o arquivo de autorização além da palavra');
+  const quando = ge.slice(ge.indexOf('## Quando escalar'));
+  if (!/Produção e ato sem volta/.test(quando) || !/para produção e ato sem volta, só vale/.test(quando)) problemas.push('a skill gerente não diz "produção e ato sem volta"');
+  if (!quando.includes('grava a autorização em `ops/autorizacoes/<ID>.md`')) problemas.push('a skill gerente não manda gravar a autorização do projeto');
+  for (const [nome, t] of [['executor', ex], ['gerente', ge]]) {
+    if (/palavra[^.]{0,60}(dispensa|substitui|torna desnecess)[^.]{0,60}autoriza/i.test(t)) problemas.push(`a skill ${nome} diz que a palavra dispensa a autorização`);
+    if (/(?<!não )basta a palavra/i.test(t)) problemas.push(`a skill ${nome} diz que basta a palavra`);
+  }
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('pacote: a skill gerente não ensina mais "aqui, no chat do Gerente" nem "no seu próprio chat" como único lugar do "pode"', () => {
+  const g = lerPacote('skills/gerente/SKILL.md').replace(/\s+/g, ' ');
+  const problemas = [];
+  if (g.includes('aqui, no chat do Gerente')) problemas.push('"aqui, no chat do Gerente"');
+  if (g.includes('no seu próprio chat')) problemas.push('"no seu próprio chat"');
+  for (const t of ['diretoria/palavras', 'chat do gerente', 'vale o arquivo, não a mensagem', 'devolva a dúvida à Diretoria', 'ops/autorizacoes/<ID>.md']) if (!g.includes(t)) problemas.push(`a skill gerente não diz "${t}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('pacote: diretoria e triagem citam diretoria/palavras; a Diretoria só transmite e confirma antes de gravar produção', () => {
+  const d = lerPacote('skills/diretoria/SKILL.md').replace(/\s+/g, ' ');
+  const t = lerPacote('skills/triagem/SKILL.md').replace(/\s+/g, ' ');
+  const problemas = [];
+  for (const f of ['diretoria/palavras/<AAAA-MM-DD>-<ID>.md', 'diretoria/modelos/palavra.md', 'palavras exatas', 'hora de Brasília', 'repetir antes ao proprietário o que entendeu', 'só transmite', 'não amplia o que ele disse']) {
+    if (!d.includes(f)) problemas.push(`skill diretoria sem "${f}"`);
+  }
+  if (!t.includes('diretoria/palavras')) problemas.push('skill triagem sem diretoria/palavras');
+  for (const nome of ['executor', 'os-nova', 'plantao']) if (!lerPacote(`skills/${nome}/SKILL.md`).includes('diretoria/palavras')) problemas.push(`skill ${nome} sem diretoria/palavras`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('pacote: nenhuma skill, doc, modelo de sede nem README afirma que o "pode" só vale no chat do gerente ou "no chat deles"', () => {
+  const lugares = [
+    ...SKILLS_DO_PACOTE().map((s) => [`skills/${s.nome}`, s.texto]),
+    ['README.md', lerPacote('README.md')],
+    ...readdirSync(join(PACOTE, 'docs')).map((n) => [`docs/${n}`, lerPacote(`docs/${n}`)]),
+    ...arquivosMdDe(SEDE_PARTIDA).map((f) => [`templates/sede/${f}`, lerSedePartida(f)]),
+  ];
+  const proibidos = [/só no chat do gerente/i, /no chat deles/i, /aqui, no chat do Gerente/, /no seu próprio chat/, /O proprietário fala com um chat por projeto/i, /fala com um\s+chat só/i];
+  const achados = [];
+  for (const [onde, texto] of lugares) {
+    const plano = texto.replace(/\s+/g, ' ');
+    for (const re of proibidos) if (re.test(plano)) achados.push(`${onde}: ${re}`);
+  }
+  return achados.length === 0 ? true : { ok: false, detalhe: achados.join('; ') };
+});
+casoPal('pacote: memorando, README de autorizações e modelos de projeto do pacote falam da palavra dada à Diretoria', () => {
+  const problemas = [];
+  const m = lerSedePartida('diretoria/memorando.md').replace(/\s+/g, ' ');
+  for (const f of ['ou com a Diretoria, à escolha dele', 'diretoria/palavras/', 'ou à Diretoria, que grava o pedido em arquivo', 'só depois de gravado em `diretoria/palavras/`']) if (!m.includes(f)) problemas.push(`memorando sem "${f}"`);
+  const leiames = ['diretoria/autorizacoes/README.md', ...['app', 'operacao', 'servico', 'site'].map((t) => `diretoria/modelos/projeto/${t}/ops/autorizacoes/README.md`)];
+  for (const rel of leiames) if (!lerSedePartida(rel).includes('diretoria/palavras/')) problemas.push(`${rel} sem diretoria/palavras/`);
+  if (!lerSedePartida('diretoria/modelos/README.md').includes('`palavra.md`')) problemas.push('modelos/README sem palavra.md');
+  if (!lerSedePartida('README.md').includes('`palavras/`')) problemas.push('README da sede sem palavras/');
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
+});
+casoPal('pacote: a versão 1.2.9 está no plugin.json e no título do README, e a entrada 1.2.3 do CHANGELOG descreve a regra 4 nova', () => {
+  const p = JSON.parse(lerPacote('.claude-plugin/plugin.json'));
+  const log = lerPacote('CHANGELOG.md');
+  const problemas = [];
+  if (p.version !== '1.2.9') problemas.push(`plugin.json ${p.version}`);
+  if (!lerPacote('README.md').startsWith('# InToca Sede (plugin `intoca`, versão 1.2.9)')) problemas.push('título do README');
+  if (!log.includes('## [1.2.3] - 2026-11-16')) problemas.push('CHANGELOG sem a entrada 1.2.3');
+  const entrada = log.slice(log.indexOf('## [1.2.3]'), log.indexOf('## [1.2.2]'));
+  for (const t of ['diretoria/palavras', 'palavra.md', 'regra 4', 'Diretoria']) if (!entrada.includes(t)) problemas.push(`a entrada 1.2.3 não diz "${t}"`);
+  return problemas.length === 0 ? true : { ok: false, detalhe: problemas.join('; ') };
 });
 
 // ---------------------------------------------------------------- limpeza e resumo
